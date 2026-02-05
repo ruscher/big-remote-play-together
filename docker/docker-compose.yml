@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # Sunshine Host Service
+  sunshine:
+    image: lizardbyte/sunshine:latest
+    container_name: big-remoteplay-sunshine
+    restart: unless-stopped
+    network_mode: host
+    devices:
+      - /dev/dri:/dev/dri  # GPU access
+    volumes:
+      - ~/.config/big-remoteplay/sunshine:/config
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - DISPLAY=${DISPLAY}
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Sao_Paulo
+    ports:
+      - "47989:47989"  # Web UI
+      - "47984-47990:47984-47990/tcp"  # Control
+      - "48010:48010/tcp"  # Video
+      - "47998-48000:47998-48000/udp"  # Streaming
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+      
+  # STUN Server (NAT traversal)
+  coturn:
+    image: coturn/coturn:latest
+    container_name: big-remoteplay-stun
+    restart: unless-stopped
+    network_mode: host
+    command: 
+      - "-n"
+      - "--log-file=stdout"
+      - "--min-port=49152"
+      - "--max-port=49252"
+      - "--realm=big-remoteplay"
+      - "--fingerprint"
+      - "--lt-cred-mech"
+      - "--user=bigremote:bigremote123"
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49152-49252:49152-49252/udp"
+
+  # Optional: Guacamole for web-based RDP (fallback)
+  guacamole:
+    image: guacamole/guacamole:latest
+    container_name: big-remoteplay-guacamole
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - GUACD_HOSTNAME=guacd
+      - MYSQL_HOSTNAME=mysql
+      - MYSQL_DATABASE=guacamole_db
+      - MYSQL_USER=guacamole_user
+      - MYSQL_PASSWORD=guacamole_pass
+    depends_on:
+      - guacd
+      - mysql
+    profiles:
+      - fallback
+
+  guacd:
+    image: guacamole/guacd:latest
+    container_name: big-remoteplay-guacd
+    restart: unless-stopped
+    profiles:
+      - fallback
+
+  mysql:
+    image: mysql:8.0
+    container_name: big-remoteplay-mysql
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_pass
+      - MYSQL_DATABASE=guacamole_db
+      - MYSQL_USER=guacamole_user
+      - MYSQL_PASSWORD=guacamole_pass
+    volumes:
+      - mysql-data:/var/lib/mysql
+    profiles:
+      - fallback
+
+volumes:
+  mysql-data:
+
+networks:
+  default:
+    name: big-remoteplay-network

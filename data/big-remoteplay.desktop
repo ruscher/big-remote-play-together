@@ -1,0 +1,30 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Big Remote Play Together
+GenericName=Remote Gaming System
+Comment=Jogue cooperativamente através da rede com Sunshine e Moonlight
+Icon=big-remoteplay
+Exec=big-remoteplay
+Terminal=false
+Categories=Game;Network;RemoteAccess;
+Keywords=gaming;remote;streaming;sunshine;moonlight;cooperative;multiplayer;
+StartupNotify=true
+StartupWMClass=big-remoteplay
+
+# Translations
+Comment[pt_BR]=Jogue cooperativamente através da rede com Sunshine e Moonlight
+GenericName[pt_BR]=Sistema de Jogos Remotos
+
+# Actions
+Actions=Host;Connect;
+
+[Desktop Action Host]
+Name=Hospedar Jogo
+Name[pt_BR]=Hospedar Jogo
+Exec=big-remoteplay --host
+
+[Desktop Action Connect]
+Name=Conectar a Host
+Name[pt_BR]=Conectar a Host
+Exec=big-remoteplay --connect
