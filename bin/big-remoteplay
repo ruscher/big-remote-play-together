@@ -1,0 +1,5 @@
+#!/bin/bash
+# Wrapper to run the application from the source tree
+REAL_PATH=$(dirname $(realpath $0))
+cd "$REAL_PATH/../src"
+exec python3 main.py "$@"

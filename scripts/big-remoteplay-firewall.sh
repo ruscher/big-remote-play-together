@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SUNSHINE_PORTS="47984:47990/tcp 48010/tcp 47998:48000/udp"
+SUNSHINE_PORTS="47984:47990/tcp 48010/tcp 47998:48000/udp 48011/udp"
 
 configure_ufw() {
     echo "🔥 Configurando UFW..."
@@ -29,10 +29,12 @@ configure_iptables() {
     iptables -A INPUT -p tcp --dport 47984:47990 -j ACCEPT -m comment --comment "Big Remote Play"
     iptables -A INPUT -p tcp --dport 48010 -j ACCEPT -m comment --comment "Big Remote Play"
     iptables -A INPUT -p udp --dport 47998:48000 -j ACCEPT -m comment --comment "Big Remote Play"
+    iptables -A INPUT -p udp --dport 48011 -j ACCEPT -m comment --comment "Big Remote Play - PIN"
     
     ip6tables -A INPUT -p tcp --dport 47984:47990 -j ACCEPT -m comment --comment "Big Remote Play"
     ip6tables -A INPUT -p tcp --dport 48010 -j ACCEPT -m comment --comment "Big Remote Play"
     ip6tables -A INPUT -p udp --dport 47998:48000 -j ACCEPT -m comment --comment "Big Remote Play"
+    ip6tables -A INPUT -p udp --dport 48011 -j ACCEPT -m comment --comment "Big Remote Play - PIN"
     
     echo "✅ Regras iptables configuradas"
     echo "⚠️  Para tornar permanente, salve com: iptables-save > /etc/iptables/iptables.rules"
@@ -55,10 +57,12 @@ remove_iptables() {
     iptables -D INPUT -p tcp --dport 47984:47990 -j ACCEPT -m comment --comment "Big Remote Play" 2>/dev/null || true
     iptables -D INPUT -p tcp --dport 48010 -j ACCEPT -m comment --comment "Big Remote Play" 2>/dev/null || true
     iptables -D INPUT -p udp --dport 47998:48000 -j ACCEPT -m comment --comment "Big Remote Play" 2>/dev/null || true
+    iptables -D INPUT -p udp --dport 48011 -j ACCEPT -m comment --comment "Big Remote Play - PIN" 2>/dev/null || true
     
     ip6tables -D INPUT -p tcp --dport 47984:47990 -j ACCEPT -m comment --comment "Big Remote Play" 2>/dev/null || true
     ip6tables -D INPUT -p tcp --dport 48010 -j ACCEPT -m comment --comment "Big Remote Play" 2>/dev/null || true
     ip6tables -D INPUT -p udp --dport 47998:48000 -j ACCEPT -m comment --comment "Big Remote Play" 2>/dev/null || true
+    ip6tables -D INPUT -p udp --dport 48011 -j ACCEPT -m comment --comment "Big Remote Play - PIN" 2>/dev/null || true
     
     echo "✅ Regras iptables removidas"
 }
