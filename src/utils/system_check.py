@@ -40,6 +40,35 @@ class SystemCheck:
             'avahi': self.has_avahi(),
             'docker': self.has_docker(),
         }
+    
+    def is_sunshine_running(self) -> bool:
+        """Verifica se o processo Sunshine está rodando"""
+        try:
+            result = subprocess.run(
+                ['pgrep', '-x', 'sunshine'],
+                capture_output=True,
+                timeout=2
+            )
+            return result.returncode == 0
+        except:
+            return False
+    
+    def is_moonlight_running(self) -> bool:
+        """Verifica se o processo Moonlight está rodando"""
+        try:
+            # Verificar diferentes nomes de processo
+            for process_name in ['moonlight', 'moonlight-qt']:
+                result = subprocess.run(
+                    ['pgrep', '-x', process_name],
+                    capture_output=True,
+                    timeout=2
+                )
+                if result.returncode == 0:
+                    return True
+            return False
+        except:
+            return False
+
         
     def get_sunshine_version(self) -> str:
         """Obtém versão do Sunshine"""

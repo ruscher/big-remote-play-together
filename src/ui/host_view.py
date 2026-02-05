@@ -10,6 +10,8 @@ from gi.repository import Gtk, Adw, GLib
 import subprocess
 import random
 import string
+import json
+import socket
 
 class HostView(Gtk.Box):
     """Interface para hospedar jogos"""
@@ -20,7 +22,144 @@ class HostView(Gtk.Box):
         self.is_hosting = False
         self.pin_code = None
         
+        # Initialize manager
+        from host.sunshine_manager import SunshineHost
+        from pathlib import Path
+        config_dir = Path.home() / '.config' / 'big-remoteplay' / 'sunshine'
+        self.sunshine = SunshineHost(config_dir)
+        
+        # Check initial state
+        if self.sunshine.is_running():
+            self.is_hosting = True
+            # Get current IP
+            import socket
+            hostname = socket.gethostname()
+            # Try to guess IP if running
+            
+        # Carregar detecções
+        self.available_monitors = self.detect_monitors()
+        self.available_gpus = self.detect_gpus()
+        
         self.setup_ui()
+        self.sync_ui_state()
+        
+    def detect_monitors(self):
+        """Detecta monitores disponíveis"""
+        from pathlib import Path
+        import subprocess
+        monitors = [('Automático', 'auto')]
+        
+        # Adicionar índices numéricos como fallback comum para Wayland/KMS
+        for i in range(4):
+            monitors.append((f"Monitor: Índice {i}", str(i)))
+
+        try:
+            # Tentar via xrandr --current (mais confiável para conectados)
+            output = subprocess.check_output(['xrandr', '--current'], text=True, stderr=subprocess.STDOUT)
+            for line in output.split('\n'):
+                if ' connected' in line:
+                    parts = line.split()
+                    if parts:
+                        name = parts[0]
+                        # Tentar pegar a resolução se disponível
+                        res = ""
+                        for part in parts:
+                            if 'x' in part and '+' in part:
+                                res = f" ({part.split('+')[0]})"
+                                break
+                        monitors.append((f"Monitor: {name}{res}", name))
+        except:
+            # Fallback para --listactivemonitors
+            try:
+                output = subprocess.check_output(['xrandr', '--listactivemonitors'], text=True)
+                lines = output.strip().split('\n')[1:]
+                for line in lines:
+                    parts = line.split()
+                    if parts:
+                        name = parts[-1]
+                        monitors.append((f"Monitor: {name}", name))
+            except:
+                pass
+        
+        # Fallback via /sys/class/drm se xrandr falhar
+        try:
+            for p in Path('/sys/class/drm').glob('card*-*'):
+                status_file = p / 'status'
+                if status_file.exists() and status_file.read_text().strip() == 'connected':
+                    name = p.name.split('-', 1)[1]
+                    # Adicionar se já não estiver na lista
+                    if not any(name in m[1] for m in monitors):
+                        monitors.append((f"Monitor: {name}", name))
+        except:
+            pass
+                
+        return monitors
+
+    def detect_gpus(self):
+        """Detecta encoders e adapters de GPU disponíveis"""
+        from pathlib import Path
+        import subprocess
+        
+        gpus = []
+        
+        # 1. Verificar NVIDIA
+        has_nvidia = False
+        try:
+            lspci = subprocess.check_output(['lspci'], text=True).lower()
+            if 'nvidia' in lspci:
+                has_nvidia = True
+                try:
+                    subprocess.check_call(['nvidia-smi'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    gpus.append({
+                        'label': 'NVENC (NVIDIA)',
+                        'encoder': 'nvenc',
+                        'adapter': 'auto'
+                    })
+                except:
+                    pass
+            
+            if 'intel' in lspci:
+                gpus.append({
+                    'label': 'VAAPI (Intel Quicksync)',
+                    'encoder': 'vaapi',
+                    'adapter': '/dev/dri/renderD128'
+                })
+        except:
+            pass
+
+        # 2. Verificar VAAPI / DRI Adapters
+        try:
+            dri_path = Path('/dev/dri')
+            if dri_path.exists():
+                render_nodes = sorted(list(dri_path.glob('renderD*')))
+                for node in render_nodes:
+                    node_path = str(node)
+                    # Evitar duplicar se já adicionamos Intel acima
+                    if any(node_path == g['adapter'] for g in gpus):
+                        continue
+                        
+                    label = f"VAAPI (Adapter {node.name})"
+                    gpus.append({
+                        'label': label,
+                        'encoder': 'vaapi',
+                        'adapter': node_path
+                    })
+        except:
+            pass
+            
+        gpus.append({
+            'label': 'Vulkan (Experimental)',
+            'encoder': 'vulkan',
+            'adapter': 'auto'
+        })
+
+        gpus.append({
+            'label': 'Software (Lento)',
+            'encoder': 'software',
+            'adapter': 'auto'
+        })
+        
+        return gpus
         
     def setup_ui(self):
         """Configura interface"""
@@ -104,6 +243,56 @@ class HostView(Gtk.Box):
         
         game_group.add(self.players_row)
         
+        # Monitor selection
+        self.monitor_row = Adw.ComboRow()
+        self.monitor_row.set_title('Monitor / Tela')
+        self.monitor_row.set_subtitle('Selecione em qual tela o jogo será capturado')
+        
+        monitor_model = Gtk.StringList()
+        for label, _ in self.available_monitors:
+            monitor_model.append(label)
+        
+        self.monitor_row.set_model(monitor_model)
+        self.monitor_row.set_selected(0)
+        game_group.add(self.monitor_row)
+        
+        # GPU / Encoder selection
+        self.gpu_row = Adw.ComboRow()
+        self.gpu_row.set_title('Placa de Vídeo / Encoder')
+        self.gpu_row.set_subtitle('Escolha o hardware para codificação do vídeo')
+        
+        gpu_model = Gtk.StringList()
+        for gpu_info in self.available_gpus:
+            gpu_model.append(gpu_info['label'])
+            
+        self.gpu_row.set_model(gpu_model)
+        self.gpu_row.set_selected(0)
+        game_group.add(self.gpu_row)
+        
+        # Platform selection
+        self.platform_row = Adw.ComboRow()
+        self.platform_row.set_title('Método de Captura')
+        self.platform_row.set_subtitle('Wayland (recomendado), X11 (legado) ou KMS (direto)')
+        
+        platform_model = Gtk.StringList()
+        platform_model.append('Automático')
+        platform_model.append('Wayland')
+        platform_model.append('X11')
+        platform_model.append('KMS (Direto)')
+        
+        self.platform_row.set_model(platform_model)
+        # Tentar selecionar o atual
+        import os
+        session_type = os.environ.get('XDG_SESSION_TYPE', '').lower()
+        if session_type == 'wayland':
+            self.platform_row.set_selected(1)
+        elif session_type == 'x11':
+            self.platform_row.set_selected(2)
+        else:
+            self.platform_row.set_selected(0)
+            
+        game_group.add(self.platform_row)
+        
         # Advanced settings expander
         advanced_group = Adw.PreferencesGroup()
         advanced_group.set_title('Configurações Avançadas')
@@ -156,7 +345,13 @@ class HostView(Gtk.Box):
         content.append(button_box)
         
         clamp.set_child(content)
-        self.append(clamp)
+        
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.set_child(clamp)
+        
+        self.append(scroll)
         
     def create_status_card(self):
         """Cria card de status do servidor"""
@@ -190,6 +385,36 @@ class HostView(Gtk.Box):
         status_header.append(self.status_icon)
         status_header.append(status_text_box)
         
+        # Service Status Grid
+        services_grid = Gtk.Grid()
+        services_grid.set_column_spacing(24)
+        services_grid.set_row_spacing(8)
+        services_grid.set_margin_start(12)
+        services_grid.set_margin_end(12)
+        services_grid.set_margin_top(12)
+
+        # Sunshine Status
+        services_grid.attach(Gtk.Label(label="Sunshine:", xalign=0), 0, 0, 1, 1)
+        self.sunshine_status_label = Gtk.Label(label="Verificando...", xalign=0)
+        services_grid.attach(self.sunshine_status_label, 1, 0, 1, 1)
+
+        # Moonlight Status
+        services_grid.attach(Gtk.Label(label="Moonlight:", xalign=0), 0, 1, 1, 1)
+        self.moonlight_status_label = Gtk.Label(label="Verificando...", xalign=0)
+        services_grid.attach(self.moonlight_status_label, 1, 1, 1, 1)
+
+        # IPv4
+        services_grid.attach(Gtk.Label(label="IPv4:", xalign=0), 0, 2, 1, 1)
+        self.ipv4_label = Gtk.Label(label="Verificando...", xalign=0)
+        self.ipv4_label.set_selectable(True)
+        services_grid.attach(self.ipv4_label, 1, 2, 1, 1)
+
+        # IPv6
+        services_grid.attach(Gtk.Label(label="IPv6:", xalign=0), 0, 3, 1, 1)
+        self.ipv6_label = Gtk.Label(label="Verificando...", xalign=0)
+        self.ipv6_label.set_selectable(True)
+        services_grid.attach(self.ipv6_label, 1, 3, 1, 1)
+
         # Connection info (hidden by default)
         self.connection_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.connection_box.set_margin_top(12)
@@ -217,7 +442,7 @@ class HostView(Gtk.Box):
         pin_box.append(copy_pin_btn)
         pin_box.set_halign(Gtk.Align.CENTER)
         
-        # IP address
+        # IP address (Main Display for connection)
         ip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         ip_label = Gtk.Label(label='Endereço IP:')
         ip_label.add_css_class('dim-label')
@@ -239,8 +464,13 @@ class HostView(Gtk.Box):
         self.connection_box.append(ip_box)
         
         box.append(status_header)
+        box.append(services_grid) # Add the new grid
         box.append(self.connection_box)
         
+        # Start periodic check
+        GLib.timeout_add_seconds(5, self.update_status_info)
+        self.update_status_info() # Initial check
+
         return box
         
     def toggle_hosting(self, button):
@@ -250,23 +480,56 @@ class HostView(Gtk.Box):
         else:
             self.start_hosting()
             
+            
+    def sync_ui_state(self):
+        """Sincroniza UI com estado interno"""
+        if self.is_hosting:
+            self.status_icon.set_from_icon_name('network-server-symbolic')
+            self.status_label.set_text('Servidor Ativo')
+            
+            # Get IP if not set
+            if not self.ip_display.get_text():
+                 self.ip_display.set_text('localhost')
+            
+            self.status_sublabel.set_text(f'Servidor rodando')
+            
+            self.connection_box.set_visible(True)
+            
+            self.start_button.set_label('Parar Servidor')
+            self.start_button.remove_css_class('suggested-action')
+            self.start_button.add_css_class('destructive-action')
+            
+            self.perf_monitor.set_visible(True)
+            self.perf_monitor.start_monitoring()
+        else:
+            self.status_icon.set_from_icon_name('network-idle-symbolic')
+            self.status_label.set_text('Servidor Inativo')
+            self.status_sublabel.set_text('Inicie o servidor para aceitar conexões')
+            
+            self.connection_box.set_visible(False)
+            
+            self.start_button.set_label('Iniciar Servidor')
+            self.start_button.remove_css_class('destructive-action')
+            self.start_button.add_css_class('suggested-action')
+            
+            self.perf_monitor.stop_monitoring()
+            self.perf_monitor.set_visible(False)
+
     def start_hosting(self):
         """Inicia servidor Sunshine"""
-        from host.sunshine_manager import SunshineHost
-        
+        # Se já estiver rodando, reinicia para aplicar configs
+        if self.sunshine.is_running():
+            print("Reiniciando Sunshine para aplicar configurações...")
+            self.sunshine.stop()
+            import time
+            time.sleep(1) # Wait for port release
+            
         # Gerar PIN
         self.pin_code = ''.join(random.choices(string.digits, k=6))
         
         # Get IP
-        import socket
-        hostname = socket.gethostname()
-        ip_address = socket.gethostbyname(hostname)
-        
-        # Inicializar Sunshine se necessário
-        if not hasattr(self, 'sunshine'):
-            from pathlib import Path
-            config_dir = Path.home() / '.config' / 'big-remoteplay' / 'sunshine'
-            self.sunshine = SunshineHost(config_dir)
+        # User requested localhost
+        ip_address = 'localhost'
         
         # Configurar Sunshine com as opções da UI
         quality_map = {
@@ -279,8 +542,72 @@ class HostView(Gtk.Box):
         
         quality_settings = quality_map.get(self.quality_row.get_selected(), {'bitrate': 20000, 'fps': 60})
         
+        # Configurações de hardware
+        selected_monitor = self.available_monitors[self.monitor_row.get_selected()][1]
+        selected_gpu_info = self.available_gpus[self.gpu_row.get_selected()]
+        
+        sunshine_config = {
+            'encoder': selected_gpu_info['encoder'],
+            'bitrate': quality_settings['bitrate'],
+            'fps': quality_settings['fps'],
+            'videocodec': 'h264',
+            'audio': 'pulse',
+            'gamepad': 'x360',
+            'min_threads': 1,
+            'min_log_level': 4,
+            # Caminhos relativos (usando CWD definido no manager)
+            'pkey': 'pkey.pem',
+            'cert': 'cert.pem'
+        }
+
+        # Adicionar monitor se não for auto
+        if selected_monitor != 'auto':
+            sunshine_config['output_name'] = selected_monitor
+
+        # Adicionar adapter_name se for vaapi e não auto
+        if selected_gpu_info['encoder'] == 'vaapi' and selected_gpu_info['adapter'] != 'auto':
+            sunshine_config['adapter_name'] = selected_gpu_info['adapter']
+
+        # Detecção de Plataforma
+        selected_platform_idx = self.platform_row.get_selected()
+        platforms = ['auto', 'wayland', 'x11', 'kms']
+        platform = platforms[selected_platform_idx]
+
+        import os
+        if platform == 'auto':
+            session_type = os.environ.get('XDG_SESSION_TYPE', '').lower()
+            if session_type == 'wayland':
+                platform = 'wayland'
+            elif session_type == 'x11':
+                platform = 'x11'
+            else:
+                platform = 'x11' # Fallback more likely to work
+        
+        sunshine_config['platform'] = platform
+        
+        if platform == 'wayland':
+            # Tentar detectar display correto
+            wayland_disp = os.environ.get('WAYLAND_DISPLAY')
+            if wayland_disp:
+                sunshine_config['wayland.display'] = wayland_disp
+            else:
+                 # Se não detectar, tentar padrão comum ou não setar (deixar Sunshine descobrir)
+                 # Mas como o erro sugere falha, vamos tentar wayland-0 apenas se nada for achado
+                 sunshine_config['wayland.display'] = 'wayland-0'
+                 
+        elif platform == 'x11':
+             # Garantir DISPLAY :0 no conf se for X11
+             if selected_monitor == 'auto':
+                 sunshine_config['output_name'] = ':0'
+        
+        # Se for NVIDIA, podemos adicionar presets específicos se Sunshine suportar via conf
+        # Mas mantendo o básico solicitado pelo usuário
+        
         # Tentar iniciar Sunshine
         try:
+            # Aplicar configurações antes de iniciar
+            self.sunshine.configure(sunshine_config)
+            
             success = self.sunshine.start()
             
             if not success:
@@ -291,21 +618,10 @@ class HostView(Gtk.Box):
             
             # Update UI
             self.is_hosting = True
-            self.status_icon.set_from_icon_name('network-server-symbolic')
-            self.status_label.set_text('Servidor Ativo')
-            self.status_sublabel.set_text(f'Aguardando conexões em {ip_address}')
-            
             self.pin_display.set_text(self.pin_code)
             self.ip_display.set_text(ip_address)
-            self.connection_box.set_visible(True)
             
-            self.start_button.set_label('Parar Servidor')
-            self.start_button.remove_css_class('suggested-action')
-            self.start_button.add_css_class('destructive-action')
-            
-            # Mostrar e iniciar monitor de performance
-            self.perf_monitor.set_visible(True)
-            self.perf_monitor.start_monitoring()
+            self.sync_ui_state()
             
             # Mostrar toast de sucesso
             self.show_toast(f'Servidor iniciado em {ip_address}')
@@ -316,35 +632,78 @@ class HostView(Gtk.Box):
         
     def stop_hosting(self):
         """Para o servidor"""
-        if hasattr(self, 'sunshine'):
-            try:
-                success = self.sunshine.stop()
+        try:
+            success = self.sunshine.stop()
+            
+            if not success:
+                self.show_error_dialog('Erro ao Parar Sunshine',
+                    'Não foi possível parar o servidor graciosamente.\n'
+                    'Você pode precisar parar manualmente.')
+                # Continua com a atualização da UI de qualquer forma
                 
-                if not success:
-                    self.show_error_dialog('Erro ao Parar Sunshine',
-                        'Não foi possível parar o servidor graciosamente.\n'
-                        'Você pode precisar parar manualmente.')
-                    # Continua com a atualização da UI de qualquer forma
-                    
-            except Exception as e:
-                print(f"Erro ao parar Sunshine: {e}")
+        except Exception as e:
+            print(f"Erro ao parar Sunshine: {e}")
         
         self.is_hosting = False
-        self.status_icon.set_from_icon_name('network-idle-symbolic')
-        self.status_label.set_text('Servidor Inativo')
-        self.status_sublabel.set_text('Inicie o servidor para aceitar conexões')
-        
-        self.connection_box.set_visible(False)
-        
-        self.start_button.set_label('Iniciar Servidor')
-        self.start_button.remove_css_class('destructive-action')
-        self.start_button.add_css_class('suggested-action')
-        
-        # Parar e ocultar monitor de performance
-        self.perf_monitor.stop_monitoring()
-        self.perf_monitor.set_visible(False)
+        self.sync_ui_state()
         
         self.show_toast('Servidor parado')
+        
+    def update_status_info(self):
+        """Atualiza informações de status"""
+        # Checar serviços
+        sunshine_running = self.check_process_running('sunshine')
+        moonlight_running = self.check_process_running('moonlight') or self.check_process_running('moonlight-qt')
+        
+        # Atualizar labels
+        if sunshine_running:
+            self.sunshine_status_label.set_markup('<span color="green">Executando</span>')
+        else:
+            self.sunshine_status_label.set_markup('<span color="red">Parado</span>')
+            
+        if moonlight_running:
+            self.moonlight_status_label.set_markup('<span color="green">Executando</span>')
+        else:
+            self.moonlight_status_label.set_markup('<span color="gray">Parado</span>')
+            
+        # Atualizar IPs
+        ipv4, ipv6 = self.get_ip_addresses()
+        self.ipv4_label.set_text(ipv4)
+        self.ipv6_label.set_text(ipv6)
+        
+        return True # Continue calling
+        
+    def check_process_running(self, process_name):
+        """Verifica se um processo está rodando"""
+        try:
+            subprocess.check_output(["pgrep", "-x", process_name])
+            return True
+        except subprocess.CalledProcessError:
+            return False
+            
+    def get_ip_addresses(self):
+        """Obtém endereços IPv4 e IPv6"""
+        ipv4 = "Desconhecido"
+        ipv6 = "Desconhecido"
+        
+        try:
+            res = subprocess.run(['ip', '-j', 'addr'], capture_output=True, text=True)
+            if res.returncode == 0:
+                data = json.loads(res.stdout)
+                for iface in data:
+                    # Ignorar loopback e interfaces down
+                    if iface['ifname'] == 'lo' or 'UP' not in iface['flags']:
+                        continue
+                        
+                    for addr in iface.get('addr_info', []):
+                        if addr['family'] == 'inet':
+                            ipv4 = addr['local']
+                        elif addr['family'] == 'inet6' and addr.get('scope') == 'global':
+                            ipv6 = addr['local']
+        except Exception as e:
+            print(f"Erro ao obter IPs: {e}")
+            
+        return ipv4, ipv6
         
     def copy_pin(self, button):
         """Copia PIN para clipboard"""
@@ -379,7 +738,8 @@ class HostView(Gtk.Box):
         """Abre configuração do Sunshine"""
         # Abrir web UI do Sunshine
         import webbrowser
-        webbrowser.open('http://localhost:47989')
+        # Sunshine uses HTTPS on port 47990 by default for Web UI
+        webbrowser.open('https://localhost:47990')
 
     def cleanup(self):
         """Limpa recursos ao fechar"""

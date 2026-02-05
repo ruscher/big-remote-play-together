@@ -18,9 +18,17 @@ class GuestView(Gtk.Box):
         
         self.discovered_hosts = []
         self.is_connected = False
+        self.pin_dialog = None
+        
+        # Initialize client
+        from guest.moonlight_client import MoonlightClient
+        self.moonlight = MoonlightClient()
         
         self.setup_ui()
         self.discover_hosts()
+        
+        # Start monitoring
+        GLib.timeout_add(1000, self.monitor_connection)
         
     def setup_ui(self):
         """Configura interface"""
@@ -87,9 +95,9 @@ class GuestView(Gtk.Box):
         settings_group.set_margin_top(12)
         
         # Quality preference
-        quality_row = Adw.ComboRow()
-        quality_row.set_title('Qualidade de Vídeo')
-        quality_row.set_subtitle('Ajustar automaticamente conforme a rede')
+        self.quality_row = Adw.ComboRow()
+        self.quality_row.set_title('Qualidade de Vídeo')
+        self.quality_row.set_subtitle('Ajustar automaticamente conforme a rede')
         
         quality_model = Gtk.StringList()
         quality_model.append('Automática (Recomendado)')
@@ -99,31 +107,31 @@ class GuestView(Gtk.Box):
         quality_model.append('1440p 60fps')
         quality_model.append('4K 60fps')
         
-        quality_row.set_model(quality_model)
-        quality_row.set_selected(0)
+        self.quality_row.set_model(quality_model)
+        self.quality_row.set_selected(0)
         
-        settings_group.add(quality_row)
+        settings_group.add(self.quality_row)
         
         # Audio
-        audio_row = Adw.SwitchRow()
-        audio_row.set_title('Áudio')
-        audio_row.set_subtitle('Receber streaming de áudio')
-        audio_row.set_active(True)
-        settings_group.add(audio_row)
+        self.audio_row = Adw.SwitchRow()
+        self.audio_row.set_title('Áudio')
+        self.audio_row.set_subtitle('Receber streaming de áudio')
+        self.audio_row.set_active(True)
+        settings_group.add(self.audio_row)
         
         # Hardware decode
-        hw_decode_row = Adw.SwitchRow()
-        hw_decode_row.set_title('Decodificação por Hardware')
-        hw_decode_row.set_subtitle('Usar GPU para decodificar (recomendado)')
-        hw_decode_row.set_active(True)
-        settings_group.add(hw_decode_row)
+        self.hw_decode_row = Adw.SwitchRow()
+        self.hw_decode_row.set_title('Decodificação por Hardware')
+        self.hw_decode_row.set_subtitle('Usar GPU para decodificar (recomendado)')
+        self.hw_decode_row.set_active(True)
+        settings_group.add(self.hw_decode_row)
         
         # Fullscreen
-        fullscreen_row = Adw.SwitchRow()
-        fullscreen_row.set_title('Tela Cheia')
-        fullscreen_row.set_subtitle('Iniciar em modo tela cheia')
-        fullscreen_row.set_active(False)
-        settings_group.add(fullscreen_row)
+        self.fullscreen_row = Adw.SwitchRow()
+        self.fullscreen_row.set_title('Tela Cheia')
+        self.fullscreen_row.set_subtitle('Iniciar em modo tela cheia')
+        self.fullscreen_row.set_active(False)
+        settings_group.add(self.fullscreen_row)
         
         # Add to content
         content.append(header)
@@ -131,7 +139,13 @@ class GuestView(Gtk.Box):
         content.append(settings_group)
         
         clamp.set_child(content)
-        self.append(clamp)
+        
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.set_child(clamp)
+        
+        self.append(scroll)
         
     def create_status_card(self):
         """Cria card de status da conexão"""
@@ -166,7 +180,50 @@ class GuestView(Gtk.Box):
         status_box.append(status_text)
         
         box.append(status_box)
+        
+        # Process Status
+        process_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        process_box.set_margin_start(12)
+        process_box.set_margin_bottom(12)
+        
+        proc_label = Gtk.Label(label="Status do Moonlight:")
+        proc_label.add_css_class('dim-label')
+        
+        self.process_status_label = Gtk.Label(label="Aguardando...")
+        
+        process_box.append(proc_label)
+        process_box.append(self.process_status_label)
+        
+        box.append(process_box)
+        
         return box
+
+    def monitor_connection(self):
+        """Monitora o estado da conexão Moonlight"""
+        if hasattr(self, 'moonlight'):
+            is_running = self.moonlight.is_connected()
+            
+            if is_running:
+                self.process_status_label.set_markup('<span color="green">Executando (Janela Aberta)</span>')
+                if not self.is_connected:
+                     # Atualizar state se estava desmarcado
+                     self.is_connected = True
+                     self.status_icon.set_from_icon_name('network-transmit-receive-symbolic')
+                     if self.moonlight.connected_host:
+                        self.status_label.set_text(f'Conectado a {self.moonlight.connected_host}')
+            else:
+                self.process_status_label.set_markup('<span color="gray">Parado</span>')
+                if self.is_connected:
+                    # Detectou que fechou
+                    self.is_connected = False
+                    self.status_label.set_text('Desconectado')
+                    self.status_sublabel.set_text('Sessão encerrada')
+                    self.status_icon.set_from_icon_name('network-offline-symbolic')
+                    self.perf_monitor.stop_monitoring()
+                    self.perf_monitor.set_visible(False)
+                    self.show_toast("Moonlight encerrado")
+
+        return True # Continue polling
         
     def create_discover_page(self):
         """Cria página de descoberta automática"""
@@ -188,6 +245,7 @@ class GuestView(Gtk.Box):
         self.hosts_list = Gtk.ListBox()
         self.hosts_list.add_css_class('boxed-list')
         self.hosts_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.hosts_list.set_activate_on_single_click(False)  # Crucial: permite botões internos funcionarem
         
         # Placeholder
         placeholder = Adw.StatusPage()
@@ -332,106 +390,309 @@ class GuestView(Gtk.Box):
             self.hosts_list.append(row)
             
     def create_host_row(self, host):
-        """Cria linha para um host"""
-        row = Gtk.ListBoxRow()
+        """Cria linha para um host usando Adw.ActionRow"""
+        row = Adw.ActionRow()
+        row.set_title(host['name'])
+        row.set_subtitle(host['ip'])
+        row.set_activatable(False)
         
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
-        
-        # Icon
+        # Ícone
         icon = Gtk.Image.new_from_icon_name('computer-symbolic')
         icon.set_pixel_size(32)
+        row.add_prefix(icon)
         
-        # Info
-        info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        info_box.set_hexpand(True)
-        
-        name_label = Gtk.Label(label=host['name'])
-        name_label.set_halign(Gtk.Align.START)
-        name_label.add_css_class('title-4')
-        
-        ip_label = Gtk.Label(label=host['ip'])
-        ip_label.set_halign(Gtk.Align.START)
-        ip_label.add_css_class('dim-label')
-        ip_label.add_css_class('monospace')
-        
-        info_box.append(name_label)
-        info_box.append(ip_label)
-        
-        # Connect button
+        # Botão conectar (suffix funciona perfeitamente em ActionRow)
         connect_btn = Gtk.Button(label='Conectar')
         connect_btn.add_css_class('suggested-action')
-        connect_btn.connect('clicked', lambda b: self.connect_to_host(host))
+        connect_btn.set_valign(Gtk.Align.CENTER)
         
-        box.append(icon)
-        box.append(info_box)
-        box.append(connect_btn)
+        def on_connect_clicked(button):
+            print(f"DEBUG: Conectando ao host descoberto: {host}")
+            self.connect_to_host(host)
+            
+        connect_btn.connect('clicked', on_connect_clicked)
         
-        row.set_child(box)
+        row.add_suffix(connect_btn)
+        
         return row
         
-    def connect_to_host(self, host):
-        """Conecta a um host"""
-        from guest.moonlight_client import MoonlightClient
-        
-        # Inicializar cliente se necessário
-        if not hasattr(self, 'moonlight'):
-            self.moonlight = MoonlightClient()
-        
-        # Obter configurações da UI
-        quality_map = {
-            0: 'auto',
-            1: '720p30',
-            2: '1080p30',
-            3: '1080p60',
-            4: '1440p60',
-            5: '4k60',
-        }
-        
-        # TODO: Pegar índice selecionado do quality_row
-        # Por enquanto usa padrão
-        quality = '1080p60'
-        
-        try:
-            # Conectar ao host
-            success = self.moonlight.connect(
-                host['ip'],
-                quality=quality,
-                fullscreen=False,  # TODO: Pegar da UI
-                audio=True,        # TODO: Pegar da UI
-                hw_decode=True     # TODO: Pegar da UI
-            )
-            
-            if success:
-                self.status_icon.set_from_icon_name('network-transmit-receive-symbolic')
-                self.status_label.set_text(f'Conectado a {host["name"]}')
-                self.status_sublabel.set_text(f'Streaming de {host["ip"]}')
-                
-                # Mostrar e iniciar monitor de performance
-                self.perf_monitor.set_visible(True)
-                self.perf_monitor.start_monitoring()
-                
-                self.show_toast(f'Conectado a {host["name"]}')
+    def show_loading(self, show=True, message=""):
+        """Mostra/Oculta diálogo de carregamento"""
+        if show:
+            if not hasattr(self, 'loading_dialog') or not self.loading_dialog:
+                self.loading_dialog = Adw.MessageDialog(
+                    heading='Aguarde',
+                    body=message
+                )
+                spinner = Gtk.Spinner()
+                spinner.start()
+                spinner.set_halign(Gtk.Align.CENTER)
+                spinner.set_size_request(32, 32)
+                spinner.set_margin_top(12)
+                self.loading_dialog.set_extra_child(spinner)
+                self.loading_dialog.present()
             else:
-                self.show_error_dialog('Erro de Conexão',
-                    f'Não foi possível conectar a {host["name"]}.\n'
-                    'Verifique se o host está acessível e o Moonlight está configurado.')
+                self.loading_dialog.set_body(message)
+        else:
+            if hasattr(self, 'loading_dialog') and self.loading_dialog:
+                self.loading_dialog.close()
+                self.loading_dialog = None
+                
+    def show_pin_dialog(self, pin):
+        """Mostra o diálogo com o PIN e instruções"""
+        if self.pin_dialog:
+            self.pin_dialog.close()
+            
+        self.pin_dialog = Adw.MessageDialog(
+            heading='Pareamento Necessário',
+            body=(
+                f'O Moonlight precisa ser pareado com o servidor.\n\n'
+                f'<span size="xx-large" weight="bold" color="accent-color">{pin}</span>\n\n'
+                f'<b>Próximos Passos:</b>\n'
+                f'1. Clique em "Abrir Painel Sunshine" abaixo (ou acesse https://localhost:47990)\n'
+                f'2. No menu superior do site, clique em <b>PIN</b>\n'
+                f'3. Digite o código acima e clique em Send'
+            )
+        )
+        self.pin_dialog.set_body_use_markup(True)
+        
+        self.pin_dialog.add_response('cancel', 'Cancelar')
+        self.pin_dialog.add_response('open_url', 'Abrir Painel Sunshine')
+        
+        self.pin_dialog.set_response_appearance('open_url', Adw.ResponseAppearance.SUGGESTED)
+        
+        def on_response(dialog, response):
+            if response == 'open_url':
+                # Reabrir dialogo já que ele fecha ao responder
+                # Mas espera, se fechar perde o PIN? 
+                # AdwMessageDialog fecha auto. Vamos abrir a URL e tentar manter ou não.
+                # Melho: Apenas abrir URL e o usuario reabre se precisar (mas o pairing background continua)
+                import webbrowser
+                webbrowser.open('https://localhost:47990/pin')
+                # O ideal seria não fechar, mas MessageDialog é modal simples.
+                # Vamos re-exibir o dialogo se clicar em abrir?
+                # Ou usar um CustomDialog... Para simplificar, vamos instruir.
+                # Como o processo de fundo espera, se o dialogo fechar, o usuario pode perder o PIN visualmente.
+                # Hack: Emitir signal para reabrir? 
+                # Na verdade, se clicar em Open URL, ele fecha. Vamos impedir isso? 
+                # AdwMessageDialog nao permite impedir fechamento facil no response.
+                # Workaround: Re-mostrar imediatamente.
+                self.show_pin_dialog(pin)
+            
+        self.pin_dialog.connect('response', on_response)
+        
+        self.pin_dialog.present()
+        
+    def close_pin_dialog(self):
+        if self.pin_dialog:
+            self.pin_dialog.close()
+            self.pin_dialog = None
+
+    def show_pairing_dialog(self, host_ip, pin=None, on_confirm=None):
+        """Mostra diálogo para pareamento (Manual ou Automático)"""
+        if hasattr(self, 'pairing_dialog') and self.pairing_dialog:
+            # Se já existe, apenas atualiza o corpo senao fecha e recria (pra simplificar)
+            if pin:
+                # Atualizar texto com o PIN
+                body_text = (
+                    f'O Moonlight precisa ser pareado com o servidor.\n\n'
+                    f'<span size="xx-large" weight="bold" color="accent-color">{pin}</span>\n\n'
+                    f'<b>Passos:</b>\n'
+                    f'1. Abra o Painel Sunshine\n'
+                    f'2. Vá na aba PIN\n'
+                    f'3. Digite o código acima e clique em Send'
+                )
+                self.pairing_dialog.set_body(body_text)
+                return
+
+        # Fechar anteriores
+        if hasattr(self, 'pairing_dialog') and self.pairing_dialog:
+             self.pairing_dialog.close()
+             
+        # Texto inicial (sem PIN ainda)
+        body_text = (
+            f'Pareamento Iniciado.\n\n'
+            f'Uma janela do Moonlight deve abrir com o código <b>PIN</b>.\n'
+            f'Se o código aparecer aqui, nós o mostraremos.\n\n'
+            f'<b>Passos:</b>\n'
+            f'1. Pegue o PIN (aqui ou na janela do Moonlight)\n'
+            f'2. Clique em "Abrir Painel Sunshine" abaixo\n'
+            f'3. Digite o PIN e confirme.'
+        )
+        
+        if pin:
+             body_text = (
+                f'O Moonlight precisa ser pareado com o servidor.\n\n'
+                f'<span size="xx-large" weight="bold" color="accent-color">{pin}</span>\n\n'
+                f'<b>Passos:</b>\n'
+                f'1. Abra o Painel Sunshine\n'
+                f'2. Vá na aba PIN\n'
+                f'3. Digite o código acima e clique em Send'
+            )
+
+        self.pairing_dialog = Adw.MessageDialog(
+            heading='Pareamento',
+            body=body_text
+        )
+        self.pairing_dialog.set_body_use_markup(True)
+        
+        self.pairing_dialog.add_response('cancel', 'Cancelar')
+        self.pairing_dialog.add_response('open_url', 'Abrir Painel Sunshine')
+        self.pairing_dialog.add_response('continue', 'Continuar')
+        
+        self.pairing_dialog.set_response_appearance('continue', Adw.ResponseAppearance.SUGGESTED)
+        
+        def on_response(dialog, response):
+            if response == 'open_url':
+                import webbrowser
+                webbrowser.open('https://localhost:47990/pin')
+                # Reabrir diálogo pois ele fecha
+                # Hack: usar GLib idle para reabrir
+                GLib.idle_add(lambda: self.show_pairing_dialog(host_ip, pin, on_confirm))
+            elif response == 'continue':
+                if on_confirm:
+                    on_confirm()
+            elif response == 'cancel':
+                 # User cancelling
+                 pass
+            
+        self.pairing_dialog.connect('response', on_response)
+        self.pairing_dialog.present()
+        
+    def close_pairing_dialog(self):
+        if hasattr(self, 'pairing_dialog') and self.pairing_dialog:
+            self.pairing_dialog.close()
+            self.pairing_dialog = None
+
+    def connect_to_host(self, host):
+        """Conecta a um host (Threaded Flow)"""
+        from guest.moonlight_client import MoonlightClient
+        import threading
+        from gi.repository import GLib
+
+        def connection_flow():
+            GLib.idle_add(lambda: self.show_loading(True, "Verificando host..."))
+            
+            # 1. Verificar se Host precisa parear
+            is_paired = self.moonlight.probe_host(host['ip'])
+            
+            if not is_paired:
+                GLib.idle_add(lambda: self.show_loading(True, "Iniciando pareamento..."))
+                print(f"Host {host['ip']} não pareado. Iniciando pareamento...")
+                
+                # Definir ação de continuação (quando usuario clicar em Continuar)
+                def on_user_confirmed():
+                    threading.Thread(target=do_connect).start()
+                
+                # Mostrar diálogo IMEDIATAMENTE (antes do pair bloquear)
+                GLib.idle_add(lambda: self.show_pairing_dialog(host['ip'], None, on_user_confirmed))
+                
+                # Callback para atualizar PIN se capturado
+                def on_pin(pin):
+                    GLib.idle_add(lambda: self.show_pairing_dialog(host['ip'], pin, on_user_confirmed))
+                
+                # Executa pareamento (Bloqueante)
+                success = self.moonlight.pair(host['ip'], on_pin)
+                
+                # Se o pareamento retornou sucesso (o processo moonlight saiu),
+                # pode ser que tenha pareado (via GUI e usuario fechou) ou falhado.
+                # Se falhou, o returncode != 0.
+                
+                if success:
+                    # Se sucesso, tenta conectar direto? 
+                    # Ou espera o usuario clicar em Continuar no dialogo?
+                    # Se o moonlight fechar sozinho é pq pareou.
+                    GLib.idle_add(self.close_pairing_dialog)
+                    GLib.idle_add(lambda: self.show_loading(True, "Pareamento concluído. Conectando..."))
+                    do_connect()
+                else:
+                    # Se falhou (timeout ou erro)
+                    # Mantem o dialogo aberto? Ou mostra erro?
+                    # Se o usuario ainda está com o dialogo aberto tentando digitar o PIN...
+                    # O pair() tem timeout? Não no meu código atual, ele espera o processo.
+                    # Se o processo morreu com erro:
+                    GLib.idle_add(lambda: self.show_error_dialog("Falha no Pareamento", 
+                        "O processo de pareamento falhou ou foi cancelado."))
+                    GLib.idle_add(self.close_pairing_dialog)
+                    GLib.idle_add(lambda: self.show_loading(False))
+                
+                return
+
+            # Se já estava pareado
+            GLib.idle_add(lambda: self.show_loading(True, "Iniciando streaming..."))
+            do_connect()
+
+        def do_connect():
+            GLib.idle_add(safe_connect_step)
+            
+        def safe_connect_step():
+            self.show_loading(True, "Conectando...")
+            
+            # Obter configurações da UI
+            quality_map = {
+                0: 'auto',
+                1: '720p30',
+                2: '1080p30',
+                3: '1080p60',
+                4: '1440p60',
+                5: '4k60',
+            }
+            
+            selected_quality_idx = self.quality_row.get_selected()
+            quality = quality_map.get(selected_quality_idx, 'auto')
+            fullscreen = self.fullscreen_row.get_active()
+            audio = self.audio_row.get_active()
+            hw_decode = self.hw_decode_row.get_active()
+
+            # Executar lógica de conexão
+            try:
+                # Verificar instalação
+                if not self.moonlight.moonlight_cmd:
+                     self.show_error_dialog('Moonlight Não Encontrado', 'Moonlight não instalado.')
+                     self.show_loading(False)
+                     return
+
+                # Connect
+                self.close_pairing_dialog() # Garantir fechamento
+                
+                success = self.moonlight.connect(
+                    host['ip'],
+                    quality=quality,
+                    fullscreen=fullscreen,
+                    audio=audio,
+                    hw_decode=hw_decode
+                )
+                
+                if success:
+                    self.show_toast(f'Conectando a {host["name"]}...')
+                    self.is_connected = True
+                    self.status_label.set_text(f'Conectado a {host["name"]}')
+                    self.status_sublabel.set_text('Sessão ativa')
+                    self.status_icon.set_from_icon_name('network-transmit-receive-symbolic')
                     
-        except Exception as e:
-            self.show_error_dialog('Erro Inesperado',
-                f'Ocorreu um erro ao conectar:\n{str(e)}')
+                    self.perf_monitor.set_visible(True)
+                    self.perf_monitor.start_monitoring()
+                else:
+                    self.show_error_dialog('Falha na Conexão', 'Não foi possível iniciar o Moonlight.')
+                        
+            except Exception as e:
+                self.show_error_dialog('Erro', f'Ocorreu um erro: {e}')
+                
+            self.show_loading(False)
+
+        # Iniciar thread
+        threading.Thread(target=connection_flow).start()
         
     def connect_manual(self, ip, port):
         """Conecta manualmente via IP"""
-        # Criar host dict e chamar connect_to_host
+        if not ip:
+            return
+            
         host = {
             'name': ip,
             'ip': ip,
             'port': int(port) if port else 47989,
-            'status': 'online'
+            'status': 'unknown'
         }
         self.connect_to_host(host)
         

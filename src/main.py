@@ -15,7 +15,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, Gio, GLib
+from gi.repository import Gtk, Adw, Gio, GLib, Gdk
 from pathlib import Path
 
 from ui.main_window import MainWindow
@@ -45,6 +45,9 @@ class BigRemotePlayApp(Adw.Application):
     def do_startup(self):
         """Inicializa o aplicativo"""
         Adw.Application.do_startup(self)
+        
+        # Carregar ícone customizado
+        self.setup_icon()
         
         # Configurar ações
         self.setup_actions()
@@ -77,12 +80,52 @@ class BigRemotePlayApp(Adw.Application):
         else:
             style_manager.set_color_scheme(Adw.ColorScheme.DEFAULT)
             
+        # Carregar CSS customizado
+        self.load_custom_css()
+    
+    def setup_icon(self):
+        """Configura ícone customizado do aplicativo"""
+        try:
+            # Caminho para o ícone SVG
+            icon_path = Path(__file__).parent.parent / 'data' / 'icons'
+            
+            if icon_path.exists():
+                # Adicionar diretório de ícones ao tema
+                icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+                icon_theme.add_search_path(str(icon_path))
+                
+                self.logger.info(f"Ícone carregado de: {icon_path}")
+            else:
+                self.logger.warning(f"Diretório de ícones não encontrado: {icon_path}")
+        except Exception as e:
+            self.logger.error(f"Erro ao carregar ícone: {e}")
+            
+    def load_custom_css(self):
+        """Carrega CSS customizado"""
+        try:
+            css_provider = Gtk.CssProvider()
+            css_path = Path(__file__).parent / 'ui' / 'style.css'
+            
+            if css_path.exists():
+                css_provider.load_from_path(str(css_path))
+                Gtk.StyleContext.add_provider_for_display(
+                    self.window.get_display() if self.window else Gdk.Display.get_default(),
+                    css_provider,
+                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+                )
+                self.logger.info(f"CSS carregado de: {css_path}")
+            else:
+                self.logger.warning(f"Arquivo CSS não encontrado: {css_path}")
+        except Exception as e:
+            self.logger.error(f"Erro ao carregar CSS: {e}")
+
+            
     def show_about(self, *args):
         """Mostra diálogo sobre"""
         about = Adw.AboutWindow(
             transient_for=self.window,
             application_name='Big Remote Play Together',
-            application_icon='big-remoteplay',
+            application_icon='big-remote-play-together',
             developer_name='Rafael Ruscher',
             version='1.0.0',
             developers=['Rafael Ruscher <rruscher@gmail.com>'],

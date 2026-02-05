@@ -44,39 +44,61 @@ class MoonlightClient:
             
         try:
             # Construir comando
-            cmd = [self.moonlight_cmd]
-            
-            # Adicionar host
-            cmd.append(host_ip)
+            # Moonlight QT exige o verbo 'stream' seguido do IP e App
+            cmd = [self.moonlight_cmd, 'stream', host_ip, 'Desktop']
             
             # Opções
             if kwargs.get('quality'):
+                # Mapeamento para resolução e FPS
+                # Formato: --resolution WxH --fps N
                 quality_map = {
-                    '720p30': ['-width', '1280', '-height', '720', '-fps', '30'],
-                    '1080p30': ['-width', '1920', '-height', '1080', '-fps', '30'],
-                    '1080p60': ['-width', '1920', '-height', '1080', '-fps', '60'],
-                    '1440p60': ['-width', '2560', '-height', '1440', '-fps', '60'],
-                    '4k60': ['-width', '3840', '-height', '2160', '-fps', '60'],
+                    '720p30': ['--resolution', '1280x720', '--fps', '30'],
+                    '1080p30': ['--resolution', '1920x1080', '--fps', '30'],
+                    '1080p60': ['--resolution', '1920x1080', '--fps', '60'],
+                    '1440p60': ['--resolution', '2560x1440', '--fps', '60'],
+                    '4k60': ['--resolution', '3840x2160', '--fps', '60'],
                 }
                 
                 if kwargs['quality'] in quality_map:
                     cmd.extend(quality_map[kwargs['quality']])
                     
             if kwargs.get('bitrate'):
-                cmd.extend(['-bitrate', str(kwargs['bitrate'])])
+                cmd.extend(['--bitrate', str(kwargs['bitrate'])])
                 
             if kwargs.get('fullscreen', False):
-                cmd.append('-fullscreen')
+                cmd.extend(['--display-mode', 'fullscreen'])
+            else:
+                cmd.extend(['--display-mode', 'windowed'])
                 
-            if not kwargs.get('audio', True):
-                cmd.append('-noaudio')
-                
+            # Audio (moonlight-qt não tem flag simples de no-audio explicita no help,
+            # assumindo padrão ligado. Se quiser desligar, teria que configurar sistema)
+            
             if kwargs.get('hw_decode', True):
-                cmd.append('-codec', 'auto')
+                cmd.extend(['--video-decoder', 'hardware'])
+            else:
+                cmd.extend(['--video-decoder', 'software'])
                 
             # Iniciar processo
-            self.process = subprocess.Popen(cmd)
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
             self.connected_host = host_ip
+            
+            # Verificar se falhou imediatamente
+            try:
+                exit_code = self.process.wait(timeout=1.0)
+                # Se chegou aqui, falhou
+                stdout, stderr = self.process.communicate()
+                print(f"Moonlight terminou imediatamente (Code {exit_code})")
+                print(f"STDOUT: {stdout}")
+                print(f"STDERR: {stderr}")
+                return False
+            except subprocess.TimeoutExpired:
+                # Continua rodando
+                pass
             
             print(f"Conectado a {host_ip}")
             return True
@@ -85,10 +107,70 @@ class MoonlightClient:
             print(f"Erro ao conectar: {e}")
             return False
             
+    def probe_host(self, host_ip: str) -> bool:
+        """Verifica se o host é acessível e está pareado (usando list)"""
+        try:
+             # Tenta listar apps. Se funcionar, está pareado.
+             # Se falhar, provavelmente precisa parear.
+             # Timeout curto pois pode travar se o host não responder
+             cmd = [self.moonlight_cmd, 'list', host_ip]
+             result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+             return result.returncode == 0
+        except:
+             return False
+
+    def pair(self, host_ip: str, on_pin_callback=None) -> bool:
+        """
+        Inicia processo de pareamento.
+        Chama on_pin_callback(pin) quando o PIN for detectado.
+        Bloqueia até parear ou falhar.
+        """
+        try:
+            cmd = [self.moonlight_cmd, 'pair', host_ip]
+            # Precisamos ler stdout em tempo real
+            process = subprocess.Popen(
+                cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True, 
+                bufsize=1
+            )
+            
+            pin_found = False
+            
+            while process.poll() is None:
+                line = process.stdout.readline()
+                if not line:
+                    break
+                    
+                print(f"PAIR: {line.strip()}") # Debug
+                
+                # Detectar PIN
+                # Ex: "Please enter the following PIN on the target PC: 1234"
+                if "PIN" in line and "target PC" in line:
+                    parts = line.strip().split()
+                    if parts:
+                        pin = parts[-1]
+                        # Remover pontuação se houver
+                        pin = ''.join(filter(str.isdigit, pin))
+                        if pin and on_pin_callback:
+                            on_pin_callback(pin)
+                            pin_found = True
+                            
+                # Detectar sucesso
+                if "successfully paired" in line.lower() or "already paired" in line.lower():
+                    process.terminate()
+                    return True
+                    
+            return process.returncode == 0
+            
+        except Exception as e:
+            print(f"Erro no pareamento: {e}")
+            return False
+
     def disconnect(self) -> bool:
         """Desconecta do host"""
         if not self.is_connected():
-            print("Não está conectado")
             return False
             
         try:
@@ -98,7 +180,6 @@ class MoonlightClient:
                 
             self.process = None
             self.connected_host = None
-            
             print("Desconectado")
             return True
             

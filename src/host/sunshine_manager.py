@@ -36,20 +36,68 @@ class SunshineHost:
         try:
             config_file = self.config_dir / 'sunshine.conf'
             
+            # O arquivo de configuração é gerado pelo HostView antes de chamar start()
+            pass
+            
+            # Verificar comando
+            import shutil
+            sunshine_cmd = shutil.which('sunshine')
+            if not sunshine_cmd:
+                print("Sunshine não encontrado no PATH")
+                return False
+
+            # Preparar ambiente
+            env = os.environ.copy()
+            if 'DISPLAY' not in env:
+                env['DISPLAY'] = ':0'
+            
+            if 'XAUTHORITY' not in env:
+                home = os.path.expanduser('~')
+                xauth = os.path.join(home, '.Xauthority')
+                if os.path.exists(xauth):
+                    env['XAUTHORITY'] = xauth
+            
+            if 'XDG_RUNTIME_DIR' not in env:
+                uid = os.getuid()
+                runtime_dir = f'/run/user/{uid}'
+                if os.path.exists(runtime_dir):
+                    env['XDG_RUNTIME_DIR'] = runtime_dir
+            
+            # Repassar WAYLAND_DISPLAY se existir
+            if 'WAYLAND_DISPLAY' in os.environ:
+                env['WAYLAND_DISPLAY'] = os.environ['WAYLAND_DISPLAY']
+
             cmd = [
-                'sunshine',
-                f'--config={config_file}'
+                sunshine_cmd,
+                str(config_file)
             ]
             
-            # Iniciar processo
+            # Iniciar processo em uma nova sessão para facilitar o gerenciamento de grupo de processos
             self.process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                preexec_fn=os.setsid  # Criar novo grupo de processos
+                text=True,
+                env=env,
+                cwd=str(self.config_dir), # Forçar diretório de trabalho para configs locais
+                start_new_session=True # Criar novo group ID
             )
             
             self.pid = self.process.pid
+            
+            # Verificar se o processo morreu imediatamente (ex: erro de biblioteca)
+            try:
+                # Esperar um pouco para ver se falha na inicialização
+                exit_code = self.process.wait(timeout=1.0)
+                
+                # Se chegou aqui, o processo terminou (falhou)
+                print(f"Sunshine falhou ao iniciar (Exit code {exit_code}). Verifique os logs acima.")
+                
+                self.process = None
+                self.pid = None
+                return False
+                
+            except subprocess.TimeoutExpired:
+                # Processo continua rodando após o timeout, sucesso!
+                pass            
             
             # Salvar PID
             pid_file = self.config_dir / 'sunshine.pid'
@@ -72,17 +120,29 @@ class SunshineHost:
         try:
             if self.process:
                 # Enviar SIGTERM
+                print(f"Parando processo filho {self.process.pid}...")
                 os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-                self.process.wait(timeout=5)
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    print("Timeout, forçando kill...")
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
                 
             else:
                 # Usar PID salvo
                 pid_file = self.config_dir / 'sunshine.pid'
                 if pid_file.exists():
-                    with open(pid_file, 'r') as f:
-                        pid = int(f.read().strip())
-                        
-                    os.kill(pid, signal.SIGTERM)
+                    try:
+                        with open(pid_file, 'r') as f:
+                            pid = int(f.read().strip())
+                        print(f"Parando PID {pid} do arquivo...")
+                        os.kill(pid, signal.SIGTERM)
+                    except Exception as e:
+                        print(f"Erro ao matar PID do arquivo: {e}")
+            
+            # Fallback: garantir que não sobrou nada rodando via pkill
+            # Isso resolve casos onde o processo foi iniciado externamente ou PID file perdeu sync
+            subprocess.run(['pkill', '-x', 'sunshine'], stderr=subprocess.DEVNULL)
                     
             # Remover PID file
             pid_file = self.config_dir / 'sunshine.pid'
@@ -97,6 +157,8 @@ class SunshineHost:
             
         except Exception as e:
             print(f"Erro ao parar Sunshine: {e}")
+            # Tentar matar de qualquer jeito
+            subprocess.run(['pkill', '-x', 'sunshine'], stderr=subprocess.DEVNULL)
             return False
             
     def restart(self) -> bool:

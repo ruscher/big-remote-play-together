@@ -23,42 +23,31 @@ class NetworkDiscovery:
         def discover_thread():
             hosts = []
             
+            # 1. Tentar Avahi (mDNS)
             try:
-                # Tentar usar avahi-browse
+                # Sunshine usa _nvstream._tcp (compatibilidade Nvidia) e as vezes _sunshine._tcp
+                # Vamos buscar _nvstream._tcp
+                cmd = ['avahi-browse', '-t', '-r', '-p', '_nvstream._tcp']
                 result = subprocess.run(
-                    ['avahi-browse', '-t', '-r', '_sunshine._tcp'],
+                    cmd,
                     capture_output=True,
                     text=True,
                     timeout=5
                 )
                 
-                if result.returncode == 0:
-                    # Parser do output do avahi-browse
-                    for line in result.stdout.split('\n'):
-                        if 'address' in line.lower():
-                            # Extrair host do output
-                            # TODO: Parser mais robusto
-                            parts = line.split()
-                            if len(parts) >= 2:
-                                hosts.append({
-                                    'name': 'Sunshine Host',
-                                    'ip': parts[-1],
-                                    'port': 47989,
-                                    'status': 'online'
-                                })
-                else:
-                    self.logger.warning("avahi-browse falhou, tentando scan manual")
+                if result.returncode == 0 and result.stdout:
+                    hosts = self.parse_avahi_output(result.stdout)
+                
+                # Se não encontrou nada, tenta manual
+                if not hosts:
+                    self.logger.info("Avahi não encontrou hosts, iniciando scan manual")
                     hosts = self.manual_scan()
+                else:
+                    self.logger.info(f"Avahi encontrou {len(hosts)} hosts")
                     
-            except FileNotFoundError:
-                self.logger.warning("avahi-browse não encontrado, usando scan manual")
-                hosts = self.manual_scan()
-            except subprocess.TimeoutExpired:
-                self.logger.warning("avahi-browse timeout, usando scan manual")
-                hosts = self.manual_scan()
             except Exception as e:
-                self.logger.error(f"Erro na descoberta: {e}")
-                hosts = []
+                self.logger.warning(f"Falha no Avahi: {e}. Usando scan manual.")
+                hosts = self.manual_scan()
             
             # Chamar callback se fornecido
             if callback:
@@ -74,64 +63,71 @@ class NetworkDiscovery:
         return thread
         
     def parse_avahi_output(self, output: str) -> List[Dict[str, str]]:
-        """Parse saída do avahi-browse"""
+        """Parse saída do avahi-browse -p"""
         hosts = []
+        seen_ips = set()
         
-        # Regex para extrair informações
-        pattern = r'hostname\s*=\s*\[([^\]]+)\].*?address\s*=\s*\[([^\]]+)\]'
-        matches = re.finditer(pattern, output, re.DOTALL)
-        
-        for match in matches:
-            hostname = match.group(1)
-            ip = match.group(2)
-            
-            hosts.append({
-                'name': hostname,
-                'ip': ip,
-                'port': 47989,
-                'status': 'online'
-            })
-            
+        # Formato parsable: =;eth0;IPv4;NomeDoServico;_nvstream._tcp;local;hostname.local;192.168.X.X;47989;...
+        for line in output.split('\n'):
+            parts = line.split(';')
+            if len(parts) > 7 and parts[0] == '=':
+                service_name = parts[3]
+                hostname = parts[6]
+                ip = parts[7]
+                port = parts[8]
+                
+                if ip not in seen_ips:
+                    hosts.append({
+                        'name': service_name,
+                        'ip': ip,
+                        'port': int(port),
+                        'status': 'online',
+                        'hostname': hostname
+                    })
+                    seen_ips.add(ip)
+                    
         return hosts
         
     def manual_scan(self) -> List[Dict[str, str]]:
         """
-        Scan manual da rede local (fallback)
-        Procura por portas Sunshine abertas
+        Scan manual da rede local (rápido com threads)
         """
-        hosts = []
+        import concurrent.futures
+        from concurrent.futures import ThreadPoolExecutor
         
-        try:
-            # Obter próprio IP
-            local_ip = self.get_local_ip()
-            if not local_ip:
-                return hosts
-                
-            # Extrair subnet
+        hosts = []
+        local_ip = self.get_local_ip()
+        
+        targets = ['127.0.0.1']
+        if local_ip:
             subnet = '.'.join(local_ip.split('.')[:-1])
-            
-            # Scan rápido das primeiras 254 IPs
-            # TODO: Implementar scan paralelo para performance
+            # Adicionar IPs da subnet (1-254)
             for i in range(1, 255):
-                ip = f"{subnet}.{i}"
+                targets.append(f"{subnet}.{i}")
                 
-                if self.check_sunshine_port(ip):
-                    # Tentar obter hostname
-                    try:
-                        hostname = socket.gethostbyaddr(ip)[0]
-                    except:
-                        hostname = f"Host-{i}"
-                        
-                    hosts.append({
-                        'name': hostname,
-                        'ip': ip,
-                        'port': 47989,
-                        'status': 'online'
-                    })
+        def check_host(ip):
+            if self.check_sunshine_port(ip):
+                try:
+                    # Tentar resolver nome
+                    name = socket.gethostbyaddr(ip)[0]
+                except:
+                    name = ip
+                return {
+                    'name': name,
+                    'ip': ip,
+                    'port': 47989,
+                    'status': 'online'
+                }
+            return None
+
+        # Scan paralelo
+        with ThreadPoolExecutor(max_workers=50) as executor:
+            futures = [executor.submit(check_host, ip) for ip in targets]
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result:
+                    hosts.append(result)
                     
-        except Exception as e:
-            print(f"Erro no scan manual: {e}")
-            
         return hosts
         
     def check_sunshine_port(self, ip: str, port: int = 47989, timeout: float = 0.5) -> bool:
@@ -148,7 +144,6 @@ class NetworkDiscovery:
     def get_local_ip(self) -> str:
         """Obtém IP local"""
         try:
-            # Conectar a um servidor externo para obter IP local
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
             local_ip = s.getsockname()[0]
@@ -156,12 +151,6 @@ class NetworkDiscovery:
             return local_ip
         except:
             return ""
-            
+
     def resolve_pin(self, pin: str) -> str:
-        """
-        Resolve código PIN para endereço IP
-        TODO: Implementar servidor de descoberta central
-        """
-        # Por enquanto, retorna vazio
-        # Futuramente: consultar servidor de matchmaking
         return ""
