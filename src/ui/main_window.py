@@ -257,6 +257,28 @@ class MainWindow(Adw.ApplicationWindow):
             self.moonlight_dot.remove_css_class('status-online')
             self.moonlight_dot.add_css_class('status-offline')
 
+    def update_dependency_ui(self, has_sunshine: bool, has_moonlight: bool):
+        """Atualiza UI de dependências e bloqueia botões se necessário"""
+        # Sunshine
+        if has_sunshine:
+            self.lbl_sunshine_status.set_markup('Sunshine - <span color="#2ec27e">Instalado</span>')
+            self.host_card.set_sensitive(True)
+            self.host_card.set_tooltip_text('')
+        else:
+            self.lbl_sunshine_status.set_markup('Sunshine - <span color="#e01b24">Falta Instalar</span>')
+            self.host_card.set_sensitive(False)
+            self.host_card.set_tooltip_text('Necessário instalar Sunshine para hospedar')
+
+        # Moonlight
+        if has_moonlight:
+            self.lbl_moonlight_status.set_markup('Moonlight - <span color="#2ec27e">Instalado</span>')
+            self.guest_card.set_sensitive(True)
+            self.guest_card.set_tooltip_text('')
+        else:
+            self.lbl_moonlight_status.set_markup('Moonlight - <span color="#e01b24">Falta Instalar</span>')
+            self.guest_card.set_sensitive(False)
+            self.guest_card.set_tooltip_text('Necessário instalar Moonlight para conectar')
+
         
     def setup_content(self):
         """Configura área de conteúdo"""
@@ -297,24 +319,10 @@ class MainWindow(Adw.ApplicationWindow):
         
     def create_welcome_page(self):
         """Cria página de boas-vindas moderna"""
-        # Container principal
-        container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        container.set_vexpand(True)
-        
         # ScrolledWindow para conteúdo
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
-        
-        # Box central
-        center_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        center_box.set_halign(Gtk.Align.CENTER)
-        center_box.set_valign(Gtk.Align.CENTER)
-        center_box.set_spacing(32)
-        center_box.set_margin_start(48)
-        center_box.set_margin_end(48)
-        center_box.set_margin_top(48)
-        center_box.set_margin_bottom(48)
         
         # Status page
         status_page = Adw.StatusPage()
@@ -324,38 +332,62 @@ class MainWindow(Adw.ApplicationWindow):
             'Jogue cooperativamente através da rede local\n'
             'Compartilhe seus jogos ou conecte-se a um servidor'
         )
-        center_box.append(status_page)
+        scroll.set_child(status_page)
+        
+        # Box para conteúdo extra (Dependências, Cards, Info)
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=32)
+        content_box.set_halign(Gtk.Align.CENTER)
+        content_box.set_margin_bottom(24)
+        
+        # Dependency check section
+        dep_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        dep_box.set_halign(Gtk.Align.CENTER)
+        
+        # Title Dependencies
+        dep_title = Gtk.Label(label='Dependências')
+        dep_title.add_css_class('heading')
+        dep_title.add_css_class('dim-label')
+        dep_box.append(dep_title)
+        
+        # Sunshine Status
+        self.lbl_sunshine_status = Gtk.Label(label='Sunshine - Verificando...')
+        dep_box.append(self.lbl_sunshine_status)
+        
+        # Moonlight Status
+        self.lbl_moonlight_status = Gtk.Label(label='Moonlight - Verificando...')
+        dep_box.append(self.lbl_moonlight_status)
+        
+        content_box.append(dep_box)
         
         # Cards de ação
         cards_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
         cards_box.set_halign(Gtk.Align.CENTER)
         
         # Card Hospedar
-        host_card = self.create_action_card(
+        self.host_card = self.create_action_card(
             'Hospedar Servidor',
             'Compartilhe seus jogos com outros jogadores na rede',
             'network-server-symbolic',
             'suggested-action',
             lambda: self.navigate_to('host')
         )
-        cards_box.append(host_card)
+        cards_box.append(self.host_card)
         
         # Card Conectar
-        guest_card = self.create_action_card(
+        self.guest_card = self.create_action_card(
             'Conectar Servidor',
             'Conecte-se a um servidor de jogos na rede',
             'network-workgroup-symbolic',
             '',
             lambda: self.navigate_to('guest')
         )
-        cards_box.append(guest_card)
+        cards_box.append(self.guest_card)
         
-        center_box.append(cards_box)
+        content_box.append(cards_box)
         
         # Informações adicionais
         info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         info_box.set_halign(Gtk.Align.CENTER)
-        info_box.set_margin_top(24)
         
         info_label = Gtk.Label()
         info_label.set_markup(
@@ -364,12 +396,12 @@ class MainWindow(Adw.ApplicationWindow):
         info_label.add_css_class('dim-label')
         info_box.append(info_label)
         
-        center_box.append(info_box)
+        content_box.append(info_box)
         
-        scroll.set_child(center_box)
-        container.append(scroll)
+        # Definir conteúdo da status page
+        status_page.set_child(content_box)
         
-        return container
+        return scroll
         
     def create_action_card(self, title: str, description: str, icon: str, 
                           css_class: str, callback) -> Gtk.Widget:
@@ -466,6 +498,7 @@ class MainWindow(Adw.ApplicationWindow):
             
             GLib.idle_add(self.update_status, has_sunshine, has_moonlight)
             GLib.idle_add(self.update_server_status, sunshine_running, moonlight_running)
+            GLib.idle_add(self.update_dependency_ui, has_sunshine, has_moonlight)
             
         thread = threading.Thread(target=check, daemon=True)
         thread.start()

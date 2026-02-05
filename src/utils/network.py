@@ -154,3 +154,39 @@ class NetworkDiscovery:
 
     def resolve_pin(self, pin: str) -> str:
         return ""
+
+    def get_global_ipv4(self) -> str:
+        """Obtém IPv4 global"""
+        try:
+            # Tentar ipinfo.io com flag -4 explícita
+            cmd = ['curl', '-s', '-4', '--connect-timeout', '3', 'ipinfo.io/ip']
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+                
+            # Fallback para checkip.amazonaws.com
+            cmd = ['curl', '-s', '-4', '--connect-timeout', '3', 'checkip.amazonaws.com']
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return "Não disponível"
+        
+    def get_global_ipv6(self) -> str:
+        """Obtém IPv6 global"""
+        try:
+            # Tentar ifconfig.me com flag -6 explícita
+            cmd = ['curl', '-s', '-6', '--connect-timeout', '3', 'ifconfig.me']
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+                
+            # Fallback para icanhazip.com
+            cmd = ['curl', '-s', '-6', '--connect-timeout', '3', 'icanhazip.com']
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return "Não disponível"

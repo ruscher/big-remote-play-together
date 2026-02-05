@@ -362,10 +362,11 @@ class HostView(Gtk.Box):
         box.set_margin_start(12)
         box.set_margin_end(12)
         
-        # Status header
+        # Status header (Icon + Status Text)
         status_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         status_header.set_margin_top(12)
         status_header.set_margin_start(12)
+        status_header.set_margin_bottom(12)
         
         self.status_icon = Gtk.Image.new_from_icon_name('network-idle-symbolic')
         self.status_icon.set_pixel_size(32)
@@ -385,94 +386,120 @@ class HostView(Gtk.Box):
         status_header.append(self.status_icon)
         status_header.append(status_text_box)
         
-        # Service Status Grid
-        services_grid = Gtk.Grid()
-        services_grid.set_column_spacing(24)
-        services_grid.set_row_spacing(8)
-        services_grid.set_margin_start(12)
-        services_grid.set_margin_end(12)
-        services_grid.set_margin_top(12)
-
-        # Sunshine Status
-        services_grid.attach(Gtk.Label(label="Sunshine:", xalign=0), 0, 0, 1, 1)
-        self.sunshine_status_label = Gtk.Label(label="Verificando...", xalign=0)
-        services_grid.attach(self.sunshine_status_label, 1, 0, 1, 1)
-
-        # Moonlight Status
-        services_grid.attach(Gtk.Label(label="Moonlight:", xalign=0), 0, 1, 1, 1)
-        self.moonlight_status_label = Gtk.Label(label="Verificando...", xalign=0)
-        services_grid.attach(self.moonlight_status_label, 1, 1, 1, 1)
-
-        # IPv4
-        services_grid.attach(Gtk.Label(label="IPv4:", xalign=0), 0, 2, 1, 1)
-        self.ipv4_label = Gtk.Label(label="Verificando...", xalign=0)
-        self.ipv4_label.set_selectable(True)
-        services_grid.attach(self.ipv4_label, 1, 2, 1, 1)
-
-        # IPv6
-        services_grid.attach(Gtk.Label(label="IPv6:", xalign=0), 0, 3, 1, 1)
-        self.ipv6_label = Gtk.Label(label="Verificando...", xalign=0)
-        self.ipv6_label.set_selectable(True)
-        services_grid.attach(self.ipv6_label, 1, 3, 1, 1)
-
-        # Connection info (hidden by default)
-        self.connection_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.connection_box.set_margin_top(12)
-        self.connection_box.set_margin_bottom(12)
-        self.connection_box.set_margin_start(12)
-        self.connection_box.set_margin_end(12)
-        self.connection_box.set_visible(False)
-        
-        # PIN code
-        pin_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        pin_label = Gtk.Label(label='Código PIN:')
-        pin_label.add_css_class('dim-label')
-        
-        self.pin_display = Gtk.Label()
-        self.pin_display.add_css_class('title-1')
-        self.pin_display.add_css_class('accent')
-        
-        copy_pin_btn = Gtk.Button(icon_name='edit-copy-symbolic')
-        copy_pin_btn.add_css_class('flat')
-        copy_pin_btn.set_tooltip_text('Copiar PIN')
-        copy_pin_btn.connect('clicked', self.copy_pin)
-        
-        pin_box.append(pin_label)
-        pin_box.append(self.pin_display)
-        pin_box.append(copy_pin_btn)
-        pin_box.set_halign(Gtk.Align.CENTER)
-        
-        # IP address (Main Display for connection)
-        ip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        ip_label = Gtk.Label(label='Endereço IP:')
-        ip_label.add_css_class('dim-label')
-        
-        self.ip_display = Gtk.Label()
-        self.ip_display.add_css_class('monospace')
-        
-        copy_ip_btn = Gtk.Button(icon_name='edit-copy-symbolic')
-        copy_ip_btn.add_css_class('flat')
-        copy_ip_btn.set_tooltip_text('Copiar IP')
-        copy_ip_btn.connect('clicked', self.copy_ip)
-        
-        ip_box.append(ip_label)
-        ip_box.append(self.ip_display)
-        ip_box.append(copy_ip_btn)
-        ip_box.set_halign(Gtk.Align.CENTER)
-        
-        self.connection_box.append(pin_box)
-        self.connection_box.append(ip_box)
-        
         box.append(status_header)
-        box.append(services_grid) # Add the new grid
-        box.append(self.connection_box)
+        
+        # === Summary Box (Active Mode) ===
+        self.summary_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.summary_box.set_margin_bottom(16)
+        self.summary_box.set_margin_start(12)
+        self.summary_box.set_margin_end(12)
+        self.summary_box.set_visible(False)
+        
+        # Sunshine Status
+        sunshine_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        sunshine_lbl = Gtk.Label(label='Sunshine:')
+        sunshine_lbl.add_css_class('dim-label')
+        sunshine_lbl.set_halign(Gtk.Align.START)
+        
+        self.sunshine_val = Gtk.Label(label='On-line')
+        self.sunshine_val.add_css_class('success')
+        self.sunshine_val.set_halign(Gtk.Align.START)
+        
+        sunshine_row.append(sunshine_lbl)
+        sunshine_row.append(self.sunshine_val)
+        self.summary_box.append(sunshine_row)
+        
+        # Field widgets storage
+        self.field_widgets = {}
+        
+        # Fields to display
+        self.create_masked_row('Nome do Host', 'hostname')
+        self.create_masked_row('IPv4', 'ipv4')
+        self.create_masked_row('IPv6', 'ipv6')
+        self.create_masked_row('IPv4 Global', 'ipv4_global')
+        self.create_masked_row('IPv6 Global', 'ipv6_global')
+        
+        # PIN needs to be visible mostly
+        self.create_masked_row('PIN', 'pin')
+        
+        box.append(self.summary_box)
         
         # Start periodic check
         GLib.timeout_add_seconds(5, self.update_status_info)
-        self.update_status_info() # Initial check
+        # self.update_status_info() # Initial check - Removed to avoid early calls
 
         return box
         
+    def create_masked_row(self, title, key):
+        """Cria linha com campo mascarado (olho) e copy"""
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        
+        # Title
+        label = Gtk.Label(label=f"{title}:")
+        label.add_css_class('dim-label')
+        label.set_halign(Gtk.Align.START)
+        label.set_width_chars(15) 
+        label.set_xalign(0)
+        
+        # Value
+        value_lbl = Gtk.Label(label='••••••')
+        value_lbl.set_halign(Gtk.Align.START)
+        value_lbl.set_hexpand(True)
+        value_lbl.set_xalign(0)
+        value_lbl.set_selectable(True)
+        
+        # Eye button
+        eye_btn = Gtk.Button(icon_name='find-location-symbolic') # Eye icon equivalent
+        eye_btn.set_icon_name('view-reveal-symbolic') # Better eye icon
+        eye_btn.add_css_class('flat')
+        eye_btn.set_tooltip_text('Mostrar/Ocultar')
+        
+        # Copy button
+        copy_btn = Gtk.Button(icon_name='edit-copy-symbolic')
+        copy_btn.add_css_class('flat')
+        copy_btn.set_tooltip_text('Copiar')
+        
+        row.append(label)
+        row.append(value_lbl)
+        row.append(eye_btn)
+        row.append(copy_btn)
+        
+        self.summary_box.append(row)
+        
+        # Store widgets and state
+        self.field_widgets[key] = {
+            'label': value_lbl,
+            'real_value': '',
+            'revealed': False, 
+            'btn_eye': eye_btn
+        }
+        
+        # Connect signals
+        eye_btn.connect('clicked', lambda b: self.toggle_field_visibility(key))
+        copy_btn.connect('clicked', lambda b: self.copy_field_value(key))
+        
+    def toggle_field_visibility(self, key):
+        """Alterna visibilidade do campo"""
+        field = self.field_widgets[key]
+        field['revealed'] = not field['revealed']
+        
+        # Update icon
+        icon = 'view-conceal-symbolic' if field['revealed'] else 'view-reveal-symbolic'
+        field['btn_eye'].set_icon_name(icon)
+        
+        # Update text
+        if field['revealed']:
+            field['label'].set_text(field['real_value'])
+        else:
+            field['label'].set_text('••••••')
+            
+    def copy_field_value(self, key):
+        """Copia valor do campo"""
+        field = self.field_widgets[key]
+        if field['real_value']:
+             self.get_clipboard().set(field['real_value'])
+             self.show_toast(f"{key} copiado!")
+
     def toggle_hosting(self, button):
         """Inicia ou para o servidor"""
         if self.is_hosting:
@@ -480,20 +507,14 @@ class HostView(Gtk.Box):
         else:
             self.start_hosting()
             
-            
     def sync_ui_state(self):
         """Sincroniza UI com estado interno"""
         if self.is_hosting:
             self.status_icon.set_from_icon_name('network-server-symbolic')
             self.status_label.set_text('Servidor Ativo')
+            self.status_sublabel.set_text('Servidor rodando e pronto para conexões')
             
-            # Get IP if not set
-            if not self.ip_display.get_text():
-                 self.ip_display.set_text('localhost')
-            
-            self.status_sublabel.set_text(f'Servidor rodando')
-            
-            self.connection_box.set_visible(True)
+            self.summary_box.set_visible(True)
             
             self.start_button.set_label('Parar Servidor')
             self.start_button.remove_css_class('suggested-action')
@@ -501,12 +522,16 @@ class HostView(Gtk.Box):
             
             self.perf_monitor.set_visible(True)
             self.perf_monitor.start_monitoring()
+            
+            # Populate fields
+            self.populate_summary_fields()
+            
         else:
             self.status_icon.set_from_icon_name('network-idle-symbolic')
             self.status_label.set_text('Servidor Inativo')
             self.status_sublabel.set_text('Inicie o servidor para aceitar conexões')
             
-            self.connection_box.set_visible(False)
+            self.summary_box.set_visible(False)
             
             self.start_button.set_label('Iniciar Servidor')
             self.start_button.remove_css_class('destructive-action')
@@ -514,6 +539,43 @@ class HostView(Gtk.Box):
             
             self.perf_monitor.stop_monitoring()
             self.perf_monitor.set_visible(False)
+
+    def populate_summary_fields(self):
+        """Preenche campos do resumo"""
+        import socket
+        import threading
+        from utils.network import NetworkDiscovery
+        
+        # Hostname
+        self.update_field('hostname', socket.gethostname())
+        
+        # PIN
+        if self.pin_code:
+            self.update_field('pin', self.pin_code)
+            
+        # Local IPs (Fast)
+        ipv4, ipv6 = self.get_ip_addresses()
+        self.update_field('ipv4', ipv4)
+        self.update_field('ipv6', ipv6)
+        
+        # Global IPs (Slow - Threaded)
+        def fetch_globals():
+            net = NetworkDiscovery()
+            g_ipv4 = net.get_global_ipv4()
+            g_ipv6 = net.get_global_ipv6()
+            
+            GLib.idle_add(self.update_field, 'ipv4_global', g_ipv4)
+            GLib.idle_add(self.update_field, 'ipv6_global', g_ipv6)
+            
+        threading.Thread(target=fetch_globals, daemon=True).start()
+        
+    def update_field(self, key, value):
+        """Atualiza valor de um campo"""
+        if key in self.field_widgets:
+            self.field_widgets[key]['real_value'] = value
+            # Refresh if revealed
+            if self.field_widgets[key]['revealed']:
+                 self.field_widgets[key]['label'].set_text(value)
 
     def start_hosting(self):
         """Inicia servidor Sunshine"""
@@ -618,8 +680,7 @@ class HostView(Gtk.Box):
             
             # Update UI
             self.is_hosting = True
-            self.pin_display.set_text(self.pin_code)
-            self.ip_display.set_text(ip_address)
+            # self.pin_display and self.ip_display removed
             
             self.sync_ui_state()
             
@@ -651,25 +712,23 @@ class HostView(Gtk.Box):
         
     def update_status_info(self):
         """Atualiza informações de status"""
-        # Checar serviços
+        if not self.is_hosting:
+            return True
+            
+        # Checar serviços para atualizar status na UI se necessário
         sunshine_running = self.check_process_running('sunshine')
-        moonlight_running = self.check_process_running('moonlight') or self.check_process_running('moonlight-qt')
         
-        # Atualizar labels
-        if sunshine_running:
-            self.sunshine_status_label.set_markup('<span color="green">Executando</span>')
-        else:
-            self.sunshine_status_label.set_markup('<span color="red">Parado</span>')
+        # Atualizar label do Sunshine no resumo
+        if hasattr(self, 'sunshine_val'):
+            if sunshine_running:
+                self.sunshine_val.set_markup('<span color="#2ec27e">On-line</span>')
+            else:
+                self.sunshine_val.set_markup('<span color="#e01b24">Parado (Erro?)</span>')
             
-        if moonlight_running:
-            self.moonlight_status_label.set_markup('<span color="green">Executando</span>')
-        else:
-            self.moonlight_status_label.set_markup('<span color="gray">Parado</span>')
-            
-        # Atualizar IPs
+        # Atualizar IPs locais periodicamente
         ipv4, ipv6 = self.get_ip_addresses()
-        self.ipv4_label.set_text(ipv4)
-        self.ipv6_label.set_text(ipv6)
+        self.update_field('ipv4', ipv4)
+        self.update_field('ipv6', ipv6)
         
         return True # Continue calling
         
@@ -705,16 +764,6 @@ class HostView(Gtk.Box):
             
         return ipv4, ipv6
         
-    def copy_pin(self, button):
-        """Copia PIN para clipboard"""
-        clipboard = self.get_clipboard()
-        clipboard.set(self.pin_code)
-        
-    def copy_ip(self, button):
-        """Copia IP para clipboard"""
-        clipboard = self.get_clipboard()
-        clipboard.set(self.ip_display.get_text())
-    
     def show_error_dialog(self, title, message):
         """Mostra diálogo de erro"""
         dialog = Adw.MessageDialog.new(self.get_root())

@@ -57,14 +57,9 @@ class GuestView(Gtk.Box):
         self.perf_monitor.set_visible(False)  # Oculto até conectar
         header.add(self.perf_monitor)
         
-        # Connection method tabs
-        connection_group = Adw.PreferencesGroup()
-        connection_group.set_title('Método de Conexão')
-        connection_group.set_margin_top(12)
-        
         # Stack for connection methods
         self.method_stack = Gtk.Stack()
-        self.method_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.method_stack.set_transition_type(Gtk.StackTransitionType.NONE)
         
         # Method 1: Discover
         discover_page = self.create_discover_page()
@@ -83,11 +78,9 @@ class GuestView(Gtk.Box):
         switcher.set_stack(self.method_stack)
         switcher.set_halign(Gtk.Align.CENTER)
         
-        switcher_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        switcher_box.append(switcher)
-        switcher_box.append(self.method_stack)
-        
-        connection_group.add(switcher_box)
+        self.switcher_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.switcher_box.append(switcher)
+        self.switcher_box.append(self.method_stack)
         
         # Client settings
         settings_group = Adw.PreferencesGroup()
@@ -135,7 +128,7 @@ class GuestView(Gtk.Box):
         
         # Add to content
         content.append(header)
-        content.append(connection_group)
+        content.append(self.switcher_box)
         content.append(settings_group)
         
         clamp.set_child(content)
@@ -227,38 +220,233 @@ class GuestView(Gtk.Box):
         
     def create_discover_page(self):
         """Cria página de descoberta automática"""
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
+        self.selected_host_card_data = None
+        self.first_radio_in_list = None
         
-        # Refresh button
-        refresh_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        refresh_box.set_halign(Gtk.Align.END)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0) # Spacing 0 for tight layout
         
-        refresh_btn = Gtk.Button(label='Atualizar')
-        refresh_btn.set_icon_name('view-refresh-symbolic')
+        # Header / Refresh
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        header_box.set_margin_top(12)
+        header_box.set_margin_bottom(12)
+        header_box.set_margin_start(12)
+        header_box.set_margin_end(12)
+        
+        lbl = Gtk.Label(label="Hosts Descobertos")
+        lbl.add_css_class("heading")
+        lbl.set_halign(Gtk.Align.START)
+        lbl.set_hexpand(True)
+        
+        refresh_btn = Gtk.Button(icon_name='view-refresh-symbolic')
+        refresh_btn.set_tooltip_text("Atualizar Lista")
         refresh_btn.connect('clicked', lambda b: self.discover_hosts())
         
-        refresh_box.append(refresh_btn)
+        header_box.append(lbl)
+        header_box.append(refresh_btn)
         
         # Hosts list
         self.hosts_list = Gtk.ListBox()
         self.hosts_list.add_css_class('boxed-list')
         self.hosts_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        self.hosts_list.set_activate_on_single_click(False)  # Crucial: permite botões internos funcionarem
+        self.hosts_list.set_margin_start(12)
+        self.hosts_list.set_margin_end(12)
         
-        # Placeholder
-        placeholder = Adw.StatusPage()
-        placeholder.set_icon_name('network-workgroup-symbolic')
-        placeholder.set_title('Buscando hosts...')
-        placeholder.set_description('Procurando servidores Sunshine na rede local')
+        # scroll = Gtk.ScrolledWindow()
+        # scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # scroll.set_vexpand(True)
+        # scroll.set_child(self.hosts_list)
         
-        self.hosts_list.set_placeholder(placeholder)
+        # Main Connect Button (External)
+        action_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        action_box.set_margin_top(12)
+        action_box.set_margin_bottom(12)
+        action_box.set_margin_start(12)
+        action_box.set_margin_end(12)
         
-        box.append(refresh_box)
+        self.main_connect_btn = Gtk.Button(label='Conectar ao Host Selecionado')
+        self.main_connect_btn.add_css_class('suggested-action')
+        self.main_connect_btn.add_css_class('pill')
+        self.main_connect_btn.set_size_request(-1, 50)
+        self.main_connect_btn.set_sensitive(False) # Starts disabled
+        
+        def on_main_connect(b):
+            if self.selected_host_card_data:
+                h = self.selected_host_card_data
+                self.connect_manual(h['ip'], str(h.get('port', 47989)))
+        
+        self.main_connect_btn.connect('clicked', on_main_connect)
+        action_box.append(self.main_connect_btn)
+        
+        box.append(header_box)
+        # box.append(scroll)
         box.append(self.hosts_list)
+        box.append(action_box)
         
         return box
+
+    def discover_hosts(self):
+        """Descobre hosts na rede e popula a lista"""
+        from utils.network import NetworkDiscovery
+        import gi
+        from gi.repository import Gtk, GLib
+        
+        # Reset state
+        self.first_radio_in_list = None
+        self.selected_host_card_data = None
+        self.main_connect_btn.set_sensitive(False)
+        self.main_connect_btn.set_label('Conectar')
+        
+        # Limpar lista
+        while True:
+            row = self.hosts_list.get_row_at_index(0)
+            if row is None:
+                break
+            self.hosts_list.remove(row)
+        
+        # Placeholder de carregando
+        self.loading_row = Gtk.ListBoxRow()
+        self.loading_row.set_selectable(False)
+        self.loading_row.set_activatable(False)
+        
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_halign(Gtk.Align.CENTER)
+        
+        spinner = Gtk.Spinner()
+        spinner.start()
+        label = Gtk.Label(label='Procurando hosts...')
+        
+        box.append(spinner)
+        box.append(label)
+        self.loading_row.set_child(box)
+        self.hosts_list.append(self.loading_row)
+        
+        def on_hosts_discovered(hosts):
+            # Limpar placeholder de loading
+            if self.loading_row.get_parent():
+                self.hosts_list.remove(self.loading_row)
+            
+            # Resetar novamente o grupo de radio buttons
+            self.first_radio_in_list = None
+            
+            if not hosts:
+                row = Gtk.ListBoxRow()
+                row.set_selectable(False)
+                row.set_activatable(False)
+                
+                box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                box.set_margin_top(24)
+                box.set_margin_bottom(24)
+                box.set_halign(Gtk.Align.CENTER)
+                
+                icon = Gtk.Image.new_from_icon_name('network-offline-symbolic')
+                icon.set_pixel_size(48)
+                icon.add_css_class('dim-label')
+                
+                lbl = Gtk.Label(label='Nenhum host encontrado')
+                lbl.add_css_class('title-2')
+                
+                box.append(icon)
+                box.append(lbl)
+                
+                row.set_child(box)
+                self.hosts_list.append(row)
+            else:
+                for host in hosts:
+                    self.hosts_list.append(self.create_host_row_custom(host))
+            
+            return False
+
+        discovery = NetworkDiscovery()
+        # Fix: Passar on_hosts_discovered diretamente. 
+        # A lambda anterior retornava o ID do idle_add (True), causando loop infinito no idle_add do network.py
+        discovery.discover_hosts(callback=on_hosts_discovered)
+
+    def update_hosts_list(self, hosts):
+        # Limpar
+        self.first_radio_in_list = None
+        self.selected_host_card_data = None
+        self.main_connect_btn.set_sensitive(False)
+        
+        while True:
+            row = self.hosts_list.get_row_at_index(0)
+            if row is None:
+                break
+            self.hosts_list.remove(row)
+            
+        for host in hosts:
+            self.hosts_list.append(self.create_host_row_custom(host))
+
+    def create_host_row_custom(self, host):
+        """Cria uma linha com RadioButton para seleção"""
+        row = Gtk.ListBoxRow()
+        row.set_activatable(False)
+        row.set_selectable(False)
+        
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        
+        # Radio Button (CheckButton in group)
+        radio = Gtk.CheckButton()
+        radio.set_valign(Gtk.Align.CENTER)
+        
+        # Adicionar o radio button primeiro antes de configurar o grupo
+        if self.first_radio_in_list is None:
+            self.first_radio_in_list = radio
+        else:
+            radio.set_group(self.first_radio_in_list)
+        
+        def on_toggled(btn):
+            if btn.get_active():
+                self.selected_host_card_data = host
+                self.main_connect_btn.set_sensitive(True)
+                self.main_connect_btn.set_label(f"Conectar a {host['name']}")
+                print(f"DEBUG: Host selecionado: {host['name']}")
+        
+        radio.connect('toggled', on_toggled)
+        
+        # Ícone
+        icon = Gtk.Image.new_from_icon_name('computer-symbolic')
+        icon.set_pixel_size(32)
+        
+        # Info Box (Nome e IP)
+        info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        info.set_valign(Gtk.Align.CENTER)
+        
+        name_lbl = Gtk.Label(label=host['name'])
+        name_lbl.set_halign(Gtk.Align.START)
+        name_lbl.add_css_class('heading')
+        
+        ip_lbl = Gtk.Label(label=host['ip'])
+        ip_lbl.set_halign(Gtk.Align.START)
+        ip_lbl.add_css_class('dim-label')
+        
+        info.append(name_lbl)
+        info.append(ip_lbl)
+        
+        # Appends
+        box.append(radio)
+        box.append(icon)
+        box.append(info)
+        
+        row.set_child(box)
+        
+        # Adicionar GestureClick à linha inteira
+        gesture = Gtk.GestureClick()
+        gesture.connect("pressed", lambda gesture, n, x, y: self.on_row_clicked(gesture, radio, row, x, y))
+        row.add_controller(gesture)
+        
+        return row
+
+    def on_row_clicked(self, gesture, radio_button, row, x, y):
+        """Handler para clique na linha"""
+        # Ativar o radio button quando a linha for clicada
+        radio_button.set_active(True)
+        return True
         
     def create_manual_page(self):
         """Cria página de conexão manual"""
@@ -330,92 +518,7 @@ class GuestView(Gtk.Box):
         
         return box
         
-    def discover_hosts(self):
-        """Descobre hosts na rede"""
-        from utils.network import NetworkDiscovery
-        import gi
-        gi.require_version('Gtk', '4.0')
-        gi.require_version('Adw', '1')
-        from gi.repository import Gtk, Adw, GLib
-        
-        # Limpar lista atual
-        while self.hosts_list.get_first_child():
-            self.hosts_list.remove(self.hosts_list.get_first_child())
-        
-        # Adicionar placeholder de carregando
-        loading_row = Adw.ActionRow()
-        loading_row.set_title('Procurando hosts...')
-        spinner = Gtk.Spinner()
-        spinner.start()
-        loading_row.add_suffix(spinner)
-        self.hosts_list.append(loading_row)
-        
-        # Descobrir hosts em thread separada
-        def on_hosts_discovered(hosts):
-            # Remover placeholder
-            while self.hosts_list.get_first_child():
-                self.hosts_list.remove(self.hosts_list.get_first_child())
-            
-            if not hosts:
-                # Nenhum host encontrado
-                no_hosts_row = Adw.ActionRow()
-                no_hosts_row.set_title('Nenhum host encontrado')
-                no_hosts_row.set_subtitle('Tente conexão manual')
-                icon = Gtk.Image.new_from_icon_name('network-offline-symbolic')
-                no_hosts_row.add_prefix(icon)
-                self.hosts_list.append(no_hosts_row)
-            else:
-                # Adicionar hosts encontrados
-                for host in hosts:
-                    self.hosts_list.append(self.create_host_row(host))
-            
-            return False  # Remove GLib.idle_add callback
-        
-        discovery = NetworkDiscovery()
-        discovery.discover_hosts(callback=lambda hosts: GLib.idle_add(on_hosts_discovered, hosts))
 
-        
-    def update_hosts_list(self, hosts):
-        """Atualiza lista de hosts descobertos"""
-        # Clear list
-        while True:
-            row = self.hosts_list.get_row_at_index(0)
-            if row is None:
-                break
-            self.hosts_list.remove(row)
-            
-        # Add hosts
-        for host in hosts:
-            row = self.create_host_row(host)
-            self.hosts_list.append(row)
-            
-    def create_host_row(self, host):
-        """Cria linha para um host usando Adw.ActionRow"""
-        row = Adw.ActionRow()
-        row.set_title(host['name'])
-        row.set_subtitle(host['ip'])
-        row.set_activatable(False)
-        
-        # Ícone
-        icon = Gtk.Image.new_from_icon_name('computer-symbolic')
-        icon.set_pixel_size(32)
-        row.add_prefix(icon)
-        
-        # Botão conectar (suffix funciona perfeitamente em ActionRow)
-        connect_btn = Gtk.Button(label='Conectar')
-        connect_btn.add_css_class('suggested-action')
-        connect_btn.set_valign(Gtk.Align.CENTER)
-        
-        def on_connect_clicked(button):
-            print(f"DEBUG: Conectando ao host descoberto: {host}")
-            self.connect_to_host(host)
-            
-        connect_btn.connect('clicked', on_connect_clicked)
-        
-        row.add_suffix(connect_btn)
-        
-        return row
-        
     def show_loading(self, show=True, message=""):
         """Mostra/Oculta diálogo de carregamento"""
         if show:
@@ -571,56 +674,54 @@ class GuestView(Gtk.Box):
         from gi.repository import GLib
 
         def connection_flow():
-            GLib.idle_add(lambda: self.show_loading(True, "Verificando host..."))
-            
-            # 1. Verificar se Host precisa parear
-            is_paired = self.moonlight.probe_host(host['ip'])
-            
-            if not is_paired:
-                GLib.idle_add(lambda: self.show_loading(True, "Iniciando pareamento..."))
-                print(f"Host {host['ip']} não pareado. Iniciando pareamento...")
+            try:
+                GLib.idle_add(lambda: self.show_loading(True, "Verificando host..."))
                 
-                # Definir ação de continuação (quando usuario clicar em Continuar)
-                def on_user_confirmed():
-                    threading.Thread(target=do_connect).start()
+                # 1. Verificar se Host precisa parear
+                print(f"DEBUG: Probing host {host['ip']}...")
+                is_paired = self.moonlight.probe_host(host['ip'])
+                print(f"DEBUG: Host paired status: {is_paired}")
                 
-                # Mostrar diálogo IMEDIATAMENTE (antes do pair bloquear)
-                GLib.idle_add(lambda: self.show_pairing_dialog(host['ip'], None, on_user_confirmed))
-                
-                # Callback para atualizar PIN se capturado
-                def on_pin(pin):
-                    GLib.idle_add(lambda: self.show_pairing_dialog(host['ip'], pin, on_user_confirmed))
-                
-                # Executa pareamento (Bloqueante)
-                success = self.moonlight.pair(host['ip'], on_pin)
-                
-                # Se o pareamento retornou sucesso (o processo moonlight saiu),
-                # pode ser que tenha pareado (via GUI e usuario fechou) ou falhado.
-                # Se falhou, o returncode != 0.
-                
-                if success:
-                    # Se sucesso, tenta conectar direto? 
-                    # Ou espera o usuario clicar em Continuar no dialogo?
-                    # Se o moonlight fechar sozinho é pq pareou.
-                    GLib.idle_add(self.close_pairing_dialog)
-                    GLib.idle_add(lambda: self.show_loading(True, "Pareamento concluído. Conectando..."))
-                    do_connect()
-                else:
-                    # Se falhou (timeout ou erro)
-                    # Mantem o dialogo aberto? Ou mostra erro?
-                    # Se o usuario ainda está com o dialogo aberto tentando digitar o PIN...
-                    # O pair() tem timeout? Não no meu código atual, ele espera o processo.
-                    # Se o processo morreu com erro:
-                    GLib.idle_add(lambda: self.show_error_dialog("Falha no Pareamento", 
-                        "O processo de pareamento falhou ou foi cancelado."))
-                    GLib.idle_add(self.close_pairing_dialog)
-                    GLib.idle_add(lambda: self.show_loading(False))
-                
-                return
+                if not is_paired:
+                    GLib.idle_add(lambda: self.show_loading(True, "Iniciando pareamento..."))
+                    print(f"Host {host['ip']} não pareado. Iniciando pareamento...")
+                    
+                    # Definir ação de continuação (quando usuario clicar em Continuar)
+                    def on_user_confirmed():
+                        threading.Thread(target=do_connect).start()
+                    
+                    # Mostrar diálogo IMEDIATAMENTE (antes do pair bloquear)
+                    GLib.idle_add(lambda: self.show_pairing_dialog(host['ip'], None, on_user_confirmed))
+                    
+                    # Callback para atualizar PIN se capturado
+                    def on_pin(pin):
+                        GLib.idle_add(lambda: self.show_pairing_dialog(host['ip'], pin, on_user_confirmed))
+                    
+                    # Executa pareamento (Bloqueante)
+                    success = self.moonlight.pair(host['ip'], on_pin)
+                    
+                    if success:
+                        GLib.idle_add(self.close_pairing_dialog)
+                        GLib.idle_add(lambda: self.show_loading(True, "Pareamento concluído. Conectando..."))
+                        do_connect()
+                    else:
+                        GLib.idle_add(lambda: self.show_error_dialog("Falha no Pareamento", 
+                            "O processo de pareamento falhou ou foi cancelado."))
+                        GLib.idle_add(self.close_pairing_dialog)
+                        GLib.idle_add(lambda: self.show_loading(False))
+                    
+                    return
 
-            # Se já estava pareado
-            GLib.idle_add(lambda: self.show_loading(True, "Iniciando streaming..."))
-            do_connect()
+                # Se já estava pareado
+                GLib.idle_add(lambda: self.show_loading(True, "Iniciando streaming..."))
+                do_connect()
+                
+            except Exception as e:
+                print(f"ERROR: Exception in connection_flow: {e}")
+                import traceback
+                traceback.print_exc()
+                GLib.idle_add(lambda: self.show_error_dialog("Erro Interno", f"Erro ao conectar: {str(e)}"))
+                GLib.idle_add(lambda: self.show_loading(False))
 
         def do_connect():
             GLib.idle_add(safe_connect_step)
