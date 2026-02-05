@@ -369,6 +369,27 @@ class HostView(Gtk.Box):
         audio_row.set_subtitle('Transmitir áudio para guests')
         audio_row.set_active(True)
         self.advanced_expander.add_row(audio_row)
+
+        # Dual Audio (Host + Guest)
+        self.dual_audio_row = Adw.SwitchRow()
+        self.dual_audio_row.set_title('Áudio Híbrido (Host + Guest)')
+        self.dual_audio_row.set_subtitle('Cria saída virtual para permitir áudio simultâneo')
+        self.dual_audio_row.set_active(False)
+        self.advanced_expander.add_row(self.dual_audio_row)
+        
+        # Audio Output Selection (Visible only if Dual Audio is ON)
+        self.audio_output_row = Adw.ComboRow()
+        self.audio_output_row.set_title('Saída de Áudio Local')
+        self.audio_output_row.set_subtitle('Onde você ouvirá o som')
+        self.audio_output_row.set_visible(False)
+        
+        # Bind visibility
+        self.dual_audio_row.connect('notify::active', lambda row, param: self.audio_output_row.set_visible(row.get_active()))
+        
+        self.advanced_expander.add_row(self.audio_output_row)
+        
+        # Carregar outputs
+        self.load_audio_outputs()
         
         # Input sharing
         input_row = Adw.SwitchRow()
@@ -378,11 +399,11 @@ class HostView(Gtk.Box):
         self.advanced_expander.add_row(input_row)
         
         # UPNP
-        upnp_row = Adw.SwitchRow()
-        upnp_row.set_title('UPNP Automático')
-        upnp_row.set_subtitle('Configurar portas automaticamente no roteador')
-        upnp_row.set_active(True)
-        self.advanced_expander.add_row(upnp_row)
+        self.upnp_row = Adw.SwitchRow()
+        self.upnp_row.set_title('UPNP Automático')
+        self.upnp_row.set_subtitle('Configurar portas automaticamente no roteador')
+        self.upnp_row.set_active(True)
+        self.advanced_expander.add_row(self.upnp_row)
         
         game_group.add(self.advanced_expander)
         
@@ -418,6 +439,34 @@ class HostView(Gtk.Box):
         scroll.set_child(clamp)
         
         self.append(scroll)
+        
+    def load_audio_outputs(self):
+        """Carrega dispositivos de áudio"""
+        try:
+            from utils.audio import AudioManager
+            self.audio_manager = AudioManager()
+            
+            devices = self.audio_manager.get_output_devices()
+            self.audio_output_model = Gtk.StringList()
+            self.audio_devices = devices # Store list of dicts
+            
+            if not devices:
+                self.audio_output_model.append("Nenhum dispositivo encontrado")
+            else:
+                for dev in devices:
+                    label = dev.get('description', dev.get('name', 'Unknown'))
+                    self.audio_output_model.append(label)
+                    
+            self.audio_output_row.set_model(self.audio_output_model)
+            self.audio_output_row.set_selected(0)
+        except Exception as e:
+            print(f"Erro ao carregar dispositivos de áudio: {e}")
+            # Fallback seguro
+            self.audio_manager = None
+            self.audio_devices = []
+            self.audio_output_model = Gtk.StringList()
+            self.audio_output_model.append("Erro ao carregar áudio")
+            self.audio_output_row.set_model(self.audio_output_model)
         
     def create_status_card(self):
         """Cria card de status do servidor"""
@@ -770,6 +819,29 @@ class HostView(Gtk.Box):
                 'pkey': 'pkey.pem',
                 'cert': 'cert.pem'
             }
+            
+            # UPnP
+            if self.upnp_row.get_active():
+                sunshine_config['upnp'] = 'enabled'
+            else:
+                sunshine_config['upnp'] = 'disabled'
+            
+            # --- Configuração de Dual Audio ---
+            if self.dual_audio_row.get_active():
+                idx = self.audio_output_row.get_selected()
+                if self.audio_devices and 0 <= idx < len(self.audio_devices):
+                    target_sink = self.audio_devices[idx]['name']
+                    print(f"Configurando Dual Audio -> Target: {target_sink}")
+                    
+                    if self.audio_manager.enable_dual_audio(target_sink):
+                        # Se sucesso, configurar Sunshine para usar o GameSink
+                        sunshine_config['audio_sink'] = 'GameSink'
+                        self.show_toast("Áudio Híbrido Ativado")
+                    else:
+                        self.show_toast("Falha ao configurar Áudio Híbrido")
+                else:
+                    self.show_toast("Dispositivo de áudio inválido selecionado")
+            # ----------------------------------
     
             # Adicionar monitor se não for auto
             if selected_monitor != 'auto':
@@ -854,6 +926,10 @@ class HostView(Gtk.Box):
         if hasattr(self, 'stop_pin_listener'):
             self.stop_pin_listener()
             del self.stop_pin_listener
+            
+        # Cleanup Dual Audio
+        if hasattr(self, 'audio_manager'):
+            self.audio_manager.cleanup()
 
         try:
             success = self.sunshine.stop()
@@ -1032,4 +1108,7 @@ class HostView(Gtk.Box):
         # Garantir parada do listener
         if hasattr(self, 'stop_pin_listener'):
             self.stop_pin_listener()
+            
+        if hasattr(self, 'audio_manager'):
+            self.audio_manager.cleanup()
             self.stop_hosting()

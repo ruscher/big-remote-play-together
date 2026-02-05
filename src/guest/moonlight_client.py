@@ -14,8 +14,8 @@ class MoonlightClient:
         self.connected_host = None
         
         # Detectar comando moonlight disponível
-        self.moonlight_cmd = self.detect_moonlight()
-        
+        self.moonlight_cmd = self.detect_moonlight()        
+
     def detect_moonlight(self) -> Optional[str]:
         """Detecta qual comando Moonlight usar"""
         import shutil
@@ -209,41 +209,6 @@ class MoonlightClient:
             'moonlight_cmd': self.moonlight_cmd,
         }
         
-    def pair(self, host_ip: str, pin: Optional[str] = None) -> bool:
-        """
-        Pareia com um host
-        
-        Args:
-            host_ip: Endereço IP do host
-            pin: PIN de pareamento (se necessário)
-        """
-        if not self.moonlight_cmd:
-            return False
-            
-        try:
-            cmd = [self.moonlight_cmd, 'pair', host_ip]
-            
-            if pin:
-                # Moonlight geralmente pede PIN interativamente
-                # Pode ser necessário usar subprocess.PIPE e enviar PIN
-                process = subprocess.Popen(
-                    cmd,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                
-                stdout, stderr = process.communicate(input=f"{pin}\n")
-                return process.returncode == 0
-            else:
-                result = subprocess.run(cmd, capture_output=True)
-                return result.returncode == 0
-                
-        except Exception as e:
-            print(f"Erro ao parear: {e}")
-            return False
-            
     def list_apps(self, host_ip: str) -> list:
         """
         Lista aplicativos disponíveis no host

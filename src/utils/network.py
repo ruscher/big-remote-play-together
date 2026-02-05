@@ -77,9 +77,12 @@ class NetworkDiscovery:
                 port = parts[8]
                 
                 if ip not in seen_ips:
+                    # Formatar IPv6 com colchetes para compatibilidade com moonlight
+                    display_ip = f"[{ip}]" if ":" in ip and not ip.startswith("[") else ip
+                    
                     hosts.append({
                         'name': service_name,
-                        'ip': ip,
+                        'ip': display_ip,
                         'port': int(port),
                         'status': 'online',
                         'hostname': hostname
@@ -131,13 +134,12 @@ class NetworkDiscovery:
         return hosts
         
     def check_sunshine_port(self, ip: str, port: int = 47989, timeout: float = 0.5) -> bool:
-        """Verifica se porta Sunshine está aberta"""
+        """Verifica se porta Sunshine está aberta (IPv4/IPv6)"""
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            result = sock.connect_ex((ip, port))
+            # create_connection tenta IPv4 e IPv6 automaticamente
+            sock = socket.create_connection((ip, port), timeout=timeout)
             sock.close()
-            return result == 0
+            return True
         except:
             return False
             

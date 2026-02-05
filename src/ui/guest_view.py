@@ -469,6 +469,11 @@ class GuestView(Gtk.Box):
         port_row = Adw.EntryRow()
         port_row.set_title('Porta')
         port_row.set_text('47989')
+
+        # IPv6 Toggle
+        ipv6_row = Adw.SwitchRow()
+        ipv6_row.set_title("Usar IPv6")
+        ipv6_row.set_subtitle("Marque se estiver usando endereço IPv6")
         
         # Connect button
         connect_btn = Gtk.Button(label='Conectar')
@@ -477,10 +482,11 @@ class GuestView(Gtk.Box):
         connect_btn.set_halign(Gtk.Align.CENTER)
         connect_btn.set_size_request(200, -1)
         connect_btn.set_margin_top(12)
-        connect_btn.connect('clicked', lambda b: self.connect_manual(ip_row.get_text(), port_row.get_text()))
+        connect_btn.connect('clicked', lambda b: self.connect_manual(ip_row.get_text(), port_row.get_text(), ipv6_row.get_active()))
         
         box.append(ip_row)
         box.append(port_row)
+        box.append(ipv6_row)
         box.append(connect_btn)
         
         return box
@@ -785,10 +791,14 @@ class GuestView(Gtk.Box):
         # Iniciar thread
         threading.Thread(target=connection_flow).start()
         
-    def connect_manual(self, ip, port):
+    def connect_manual(self, ip, port, ipv6=False):
         """Conecta manualmente via IP"""
         if not ip:
             return
+            
+        # Ensure brackets if IPv6 selected or detected without them
+        if ipv6 and ":" in ip and not ip.startswith("["):
+            ip = f"[{ip}]"
             
         host = {
             'name': ip,
