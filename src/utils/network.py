@@ -152,8 +152,85 @@ class NetworkDiscovery:
         except:
             return ""
 
-    def resolve_pin(self, pin: str) -> str:
+    def resolve_pin(self, pin: str, timeout: int = 3) -> str:
+        """
+        Tenta resolver um PIN para um endereço IP broadcasting
+        Retorna o IP se encontrado, ou string vazia
+        """
+        if not pin or len(pin) != 6:
+            return ""
+            
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.settimeout(timeout)
+            
+            msg = f"WHO_HAS_PIN {pin}"
+            # Broadcast para 255.255.255.255
+            sock.sendto(msg.encode(), ('<broadcast>', 48011))
+            
+            # Esperar resposta
+            try:
+                data, addr = sock.recvfrom(1024)
+                response = data.decode()
+                if response.startswith("I_HAVE_PIN"):
+                    # addr[0] é o IP do host
+                    return addr[0]
+            except socket.timeout:
+                pass
+            finally:
+                sock.close()
+        except Exception as e:
+            self.logger.warning(f"Erro ao resolver PIN: {e}")
+            
         return ""
+
+    def start_pin_listener(self, valid_pin: str, host_name: str):
+        """
+        Inicia listener para responder a queries de PIN
+        Retorna função para parar o listener
+        """
+        import threading
+        
+        running = True
+        sock = None
+        
+        def listener_thread():
+            nonlocal sock
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(('', 48011))
+                
+                while running:
+                    try:
+                        data, addr = sock.recvfrom(1024)
+                        msg = data.decode().strip()
+                        
+                        if msg == f"WHO_HAS_PIN {valid_pin}":
+                            response = f"I_HAVE_PIN {host_name}"
+                            sock.sendto(response.encode(), addr)
+                    except OSError:
+                        pass # Socket closed
+                    except Exception as e:
+                        print(f"Erro no listener PIN: {e}")
+                        
+            except Exception as e:
+                print(f"Erro ao iniciar listener PIN: {e}")
+            finally:
+                if sock:
+                    sock.close()
+
+        t = threading.Thread(target=listener_thread, daemon=True)
+        t.start()
+        
+        def stop():
+            nonlocal running, sock
+            running = False
+            if sock:
+                sock.close()
+                
+        return stop
 
     def get_global_ipv4(self) -> str:
         """Obtém IPv4 global"""

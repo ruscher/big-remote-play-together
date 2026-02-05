@@ -799,16 +799,38 @@ class GuestView(Gtk.Box):
         
     def connect_pin(self, pin):
         """Conecta via PIN"""
-        # TODO: Implementar servidor de matchmaking para resolver PIN→IP
         if len(pin) != 6 or not pin.isdigit():
             self.show_error_dialog('PIN Inválido',
                 'O PIN deve conter exatamente 6 dígitos.')
             return
         
-        # Por enquanto, mostra mensagem
-        self.show_error_dialog('Funcionalidade em Desenvolvimento',
-            'O sistema de conexão por PIN ainda não está implementado.\n'
-            'Use conexão manual ou descoberta automática.')
+        self.show_loading(True, "Procurando host com este PIN...")
+        
+        def resolve_thread():
+             from utils.network import NetworkDiscovery
+             ip = NetworkDiscovery().resolve_pin(pin)
+             
+             if ip:
+                 GLib.idle_add(lambda: self._on_pin_resolved(ip, pin))
+             else:
+                 GLib.idle_add(lambda: self._on_pin_failed())
+                 
+        threading.Thread(target=resolve_thread, daemon=True).start()
+        
+    def _on_pin_resolved(self, ip, pin):
+        """Callback quando PIN é resolvido"""
+        self.show_loading(False)
+        self.show_toast(f"Host encontrado: {ip}")
+        # Conectar manualmente usando o IP encontrado
+        # Usamos porta padrão 47989
+        self.connect_manual(ip, '47989')
+        
+    def _on_pin_failed(self):
+        """Callback quando falha resolver PIN"""
+        self.show_loading(False)
+        self.show_error_dialog('Host Não Encontrado',
+            'Não foi possível encontrar um host com este PIN na rede local.\n'
+            'Verifique se o host está rodando e na mesma rede.')
     
     def show_error_dialog(self, title, message):
         """Mostra diálogo de erro"""

@@ -589,6 +589,11 @@ class HostView(Gtk.Box):
         # Gerar PIN
         self.pin_code = ''.join(random.choices(string.digits, k=6))
         
+        # Start PIN Listener
+        from utils.network import NetworkDiscovery
+        hostname = socket.gethostname()
+        self.stop_pin_listener = NetworkDiscovery().start_pin_listener(self.pin_code, hostname)
+        
         # Get IP
         # User requested localhost
         ip_address = 'localhost'
@@ -693,6 +698,11 @@ class HostView(Gtk.Box):
         
     def stop_hosting(self):
         """Para o servidor"""
+        # Stop PIN Listener
+        if hasattr(self, 'stop_pin_listener'):
+            self.stop_pin_listener()
+            del self.stop_pin_listener
+
         try:
             success = self.sunshine.stop()
             
@@ -798,4 +808,9 @@ class HostView(Gtk.Box):
             
         # Parar servidor se estiver rodando
         if self.is_hosting:
+            self.stop_hosting()
+            
+        # Garantir parada do listener
+        if hasattr(self, 'stop_pin_listener'):
+            self.stop_pin_listener()
             self.stop_hosting()
