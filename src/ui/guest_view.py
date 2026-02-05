@@ -42,6 +42,12 @@ class GuestView(Gtk.Box):
         
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         
+        # Loading Bar
+        self.loading_bar = Gtk.ProgressBar()
+        self.loading_bar.add_css_class('osd')
+        self.loading_bar.set_visible(False)
+        content.append(self.loading_bar)
+        
         # Header
         header = Adw.PreferencesGroup()
         header.set_title('Conectar a Host')
@@ -520,26 +526,21 @@ class GuestView(Gtk.Box):
         
 
     def show_loading(self, show=True, message=""):
-        """Mostra/Oculta diálogo de carregamento"""
-        if show:
-            if not hasattr(self, 'loading_dialog') or not self.loading_dialog:
-                self.loading_dialog = Adw.MessageDialog(
-                    heading='Aguarde',
-                    body=message
-                )
-                spinner = Gtk.Spinner()
-                spinner.start()
-                spinner.set_halign(Gtk.Align.CENTER)
-                spinner.set_size_request(32, 32)
-                spinner.set_margin_top(12)
-                self.loading_dialog.set_extra_child(spinner)
-                self.loading_dialog.present()
-            else:
-                self.loading_dialog.set_body(message)
-        else:
-            if hasattr(self, 'loading_dialog') and self.loading_dialog:
-                self.loading_dialog.close()
-                self.loading_dialog = None
+        """Mostra/Oculta status de carregamento"""
+        # ProgressBar
+        if hasattr(self, 'loading_bar'):
+             self.loading_bar.set_visible(show)
+             if show:
+                 self.loading_bar.pulse()
+        
+        # Atualizar texto de status para feedback se houver mensagem
+        if show and message and hasattr(self, 'status_sublabel'):
+             self.status_sublabel.set_text(message)
+             
+        # Force UI update
+        context = GLib.MainContext.default()
+        while context.pending():
+            context.iteration(False)
                 
     def show_pin_dialog(self, pin):
         """Mostra o diálogo com o PIN e instruções"""

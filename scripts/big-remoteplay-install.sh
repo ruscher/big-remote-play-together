@@ -63,7 +63,7 @@ echo "🔍 Verificando Sunshine e Moonlight..."
 
 if ! command -v sunshine &> /dev/null; then
     echo "⚠️  Sunshine não encontrado."
-    echo "   Você pode instalar com: yay -S sunshine-bin"
+    echo "   Você pode instalar com: yay -S sunshine"
     read -p "   Deseja continuar sem Sunshine? (modo Host não funcionará) [s/N]: " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Ss]$ ]]; then

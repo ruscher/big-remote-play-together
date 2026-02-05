@@ -46,7 +46,7 @@ sudo pacman -S python python-gobject gtk4 libadwaita python-dbus avahi
 
 ### Sunshine (Host)
 ```bash
-yay -S sunshine-bin
+yay -S sunshine
 ```
 
 ### Moonlight (Guest)

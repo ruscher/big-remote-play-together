@@ -12,6 +12,7 @@ import random
 import string
 import json
 import socket
+from utils.game_detector import GameDetector
 
 class HostView(Gtk.Box):
     """Interface para hospedar jogos"""
@@ -41,6 +42,14 @@ class HostView(Gtk.Box):
         self.available_gpus = self.detect_gpus()
         
         self.setup_ui()
+        
+        # Cache de jogos detectados
+        self.game_detector = GameDetector()
+        self.detected_games = {
+            'Steam': [],
+            'Lutris': []
+        }
+        
         self.sync_ui_state()
         
     def detect_monitors(self):
@@ -50,8 +59,9 @@ class HostView(Gtk.Box):
         monitors = [('Automático', 'auto')]
         
         # Adicionar índices numéricos como fallback comum para Wayland/KMS
-        for i in range(4):
-            monitors.append((f"Monitor: Índice {i}", str(i)))
+        # Interfaces genéricas removidas a pedido do usuário
+        # for i in range(4):
+        #    monitors.append((f"Monitor: Índice {i}", str(i)))
 
         try:
             # Tentar via xrandr --current (mais confiável para conectados)
@@ -173,6 +183,12 @@ class HostView(Gtk.Box):
         
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         
+        # Loading Bar
+        self.loading_bar = Gtk.ProgressBar()
+        self.loading_bar.add_css_class('osd')
+        self.loading_bar.set_visible(False)
+        content.append(self.loading_bar)
+        
         # Header
         header = Adw.PreferencesGroup()
         header.set_title('Hospedar Jogo')
@@ -193,21 +209,61 @@ class HostView(Gtk.Box):
         game_group.set_title('Configuração do Jogo')
         game_group.set_margin_top(12)
         
-        # Game selector
-        self.game_row = Adw.ComboRow()
-        self.game_row.set_title('Jogo')
-        self.game_row.set_subtitle('Selecione o jogo para compartilhar')
+        # Game Mode Selector
+        self.game_mode_row = Adw.ComboRow()
+        self.game_mode_row.set_title('Modo de Jogo')
+        self.game_mode_row.set_subtitle('Selecione a fonte do jogo')
         
-        games_model = Gtk.StringList()
-        games_model.append('Desktop Completo')
-        games_model.append('Steam (detectar jogos)')
-        games_model.append('Lutris (detectar jogos)')
-        games_model.append('Aplicativo Personalizado...')
+        modes_model = Gtk.StringList()
+        modes_model.append('Desktop Completo')
+        modes_model.append('Steam')
+        modes_model.append('Lutris')
+        modes_model.append('Aplicativo Personalizado')
         
-        self.game_row.set_model(games_model)
-        self.game_row.set_selected(0)
+        self.game_mode_row.set_model(modes_model)
+        self.game_mode_row.set_selected(0)
+        self.game_mode_row.connect('notify::selected', self.on_game_mode_changed)
         
-        game_group.add(self.game_row)
+        game_group.add(self.game_mode_row)
+        
+        # Platform Games Expander (Hidden by default)
+        self.platform_games_expander = Adw.ExpanderRow()
+        self.platform_games_expander.set_title("Seleção de Jogos")
+        self.platform_games_expander.set_subtitle("Escolha o jogo da lista")
+        self.platform_games_expander.set_visible(False)
+        
+        self.game_list_row = Adw.ComboRow()
+        self.game_list_row.set_title('Selecionar Jogo')
+        self.game_list_row.set_subtitle('Escolha o jogo da lista')
+        self.game_list_model = Gtk.StringList()
+        self.game_list_row.set_model(self.game_list_model)
+        
+        self.platform_games_expander.add_row(self.game_list_row)
+        game_group.add(self.platform_games_expander)
+        
+        # Custom App Fields (Hidden by default)
+        # Custom App Fields (Hidden by default)
+        self.custom_app_expander = Adw.ExpanderRow()
+        self.custom_app_expander.set_title("Detalhes do Aplicativo")
+        self.custom_app_expander.set_subtitle("Configure o nome e comando")
+        self.custom_app_expander.set_visible(False)
+        
+        self.custom_name_entry = Adw.EntryRow()
+        self.custom_name_entry.set_title('Nome do Aplicativo')
+        self.custom_app_expander.add_row(self.custom_name_entry)
+        
+        self.custom_cmd_entry = Adw.EntryRow()
+        self.custom_cmd_entry.set_title('Comando')
+        self.custom_app_expander.add_row(self.custom_cmd_entry)
+        
+        game_group.add(self.custom_app_expander)
+        
+        
+        # === Streaming Settings Expander ===
+        self.streaming_expander = Adw.ExpanderRow()
+        self.streaming_expander.set_title('Configurações de Streaming')
+        self.streaming_expander.set_subtitle('Qualidade e Jogadores')
+        self.streaming_expander.set_icon_name('preferences-desktop-display-symbolic')
         
         # Quality settings
         self.quality_row = Adw.ComboRow()
@@ -224,7 +280,7 @@ class HostView(Gtk.Box):
         self.quality_row.set_model(quality_model)
         self.quality_row.set_selected(2)  # Alta por padrão
         
-        game_group.add(self.quality_row)
+        self.streaming_expander.add_row(self.quality_row)
         
         # Max players
         self.players_row = Adw.SpinRow()
@@ -241,8 +297,15 @@ class HostView(Gtk.Box):
         self.players_row.set_adjustment(adjustment)
         self.players_row.set_digits(0)
         
-        game_group.add(self.players_row)
+        self.streaming_expander.add_row(self.players_row)
+        game_group.add(self.streaming_expander)
         
+        # === Hardware Settings Expander ===
+        self.hardware_expander = Adw.ExpanderRow()
+        self.hardware_expander.set_title('Hardware e Captura')
+        self.hardware_expander.set_subtitle('Monitor, GPU e Método de Captura')
+        self.hardware_expander.set_icon_name('video-display-symbolic')
+
         # Monitor selection
         self.monitor_row = Adw.ComboRow()
         self.monitor_row.set_title('Monitor / Tela')
@@ -254,7 +317,7 @@ class HostView(Gtk.Box):
         
         self.monitor_row.set_model(monitor_model)
         self.monitor_row.set_selected(0)
-        game_group.add(self.monitor_row)
+        self.hardware_expander.add_row(self.monitor_row)
         
         # GPU / Encoder selection
         self.gpu_row = Adw.ComboRow()
@@ -267,7 +330,7 @@ class HostView(Gtk.Box):
             
         self.gpu_row.set_model(gpu_model)
         self.gpu_row.set_selected(0)
-        game_group.add(self.gpu_row)
+        self.hardware_expander.add_row(self.gpu_row)
         
         # Platform selection
         self.platform_row = Adw.ComboRow()
@@ -291,33 +354,37 @@ class HostView(Gtk.Box):
         else:
             self.platform_row.set_selected(0)
             
-        game_group.add(self.platform_row)
+        self.hardware_expander.add_row(self.platform_row)
+        game_group.add(self.hardware_expander)
         
         # Advanced settings expander
-        advanced_group = Adw.PreferencesGroup()
-        advanced_group.set_title('Configurações Avançadas')
-        advanced_group.set_margin_top(12)
+        self.advanced_expander = Adw.ExpanderRow()
+        self.advanced_expander.set_title('Configurações Avançadas')
+        self.advanced_expander.set_subtitle('Áudio, Input e Rede')
+        self.advanced_expander.set_icon_name('preferences-system-symbolic')
         
         # Audio streaming
         audio_row = Adw.SwitchRow()
         audio_row.set_title('Streaming de Áudio')
         audio_row.set_subtitle('Transmitir áudio para guests')
         audio_row.set_active(True)
-        advanced_group.add(audio_row)
+        self.advanced_expander.add_row(audio_row)
         
         # Input sharing
         input_row = Adw.SwitchRow()
         input_row.set_title('Compartilhar Controles')
         input_row.set_subtitle('Permitir que guests controlem o jogo')
         input_row.set_active(True)
-        advanced_group.add(input_row)
+        self.advanced_expander.add_row(input_row)
         
         # UPNP
         upnp_row = Adw.SwitchRow()
         upnp_row.set_title('UPNP Automático')
         upnp_row.set_subtitle('Configurar portas automaticamente no roteador')
         upnp_row.set_active(True)
-        advanced_group.add(upnp_row)
+        self.advanced_expander.add_row(upnp_row)
+        
+        game_group.add(self.advanced_expander)
         
         # Action buttons
         button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
@@ -341,7 +408,6 @@ class HostView(Gtk.Box):
         # Add all to content
         content.append(header)
         content.append(game_group)
-        content.append(advanced_group)
         content.append(button_box)
         
         clamp.set_child(content)
@@ -577,101 +643,179 @@ class HostView(Gtk.Box):
             if self.field_widgets[key]['revealed']:
                  self.field_widgets[key]['label'].set_text(value)
 
-    def start_hosting(self):
+    def start_hosting(self, b=None):
         """Inicia servidor Sunshine"""
-        # Se já estiver rodando, reinicia para aplicar configs
-        if self.sunshine.is_running():
-            print("Reiniciando Sunshine para aplicar configurações...")
-            self.sunshine.stop()
-            import time
-            time.sleep(1) # Wait for port release
+        # Show loading
+        self.loading_bar.set_visible(True)
+        self.loading_bar.pulse()
+        context = GLib.MainContext.default()
+        while context.pending():
+            context.iteration(False)
             
-        # Gerar PIN
-        self.pin_code = ''.join(random.choices(string.digits, k=6))
-        
-        # Start PIN Listener
-        from utils.network import NetworkDiscovery
-        hostname = socket.gethostname()
-        self.stop_pin_listener = NetworkDiscovery().start_pin_listener(self.pin_code, hostname)
-        
-        # Get IP
-        # User requested localhost
-        ip_address = 'localhost'
-        
-        # Configurar Sunshine com as opções da UI
-        quality_map = {
-            0: {'bitrate': 5000, 'fps': 30},   # Baixa
-            1: {'bitrate': 10000, 'fps': 30},  # Média
-            2: {'bitrate': 20000, 'fps': 60},  # Alta
-            3: {'bitrate': 30000, 'fps': 60},  # Ultra
-            4: {'bitrate': 40000, 'fps': 60},  # Máxima
-        }
-        
-        quality_settings = quality_map.get(self.quality_row.get_selected(), {'bitrate': 20000, 'fps': 60})
-        
-        # Configurações de hardware
-        selected_monitor = self.available_monitors[self.monitor_row.get_selected()][1]
-        selected_gpu_info = self.available_gpus[self.gpu_row.get_selected()]
-        
-        sunshine_config = {
-            'encoder': selected_gpu_info['encoder'],
-            'bitrate': quality_settings['bitrate'],
-            'fps': quality_settings['fps'],
-            'videocodec': 'h264',
-            'audio': 'pulse',
-            'gamepad': 'x360',
-            'min_threads': 1,
-            'min_log_level': 4,
-            # Caminhos relativos (usando CWD definido no manager)
-            'pkey': 'pkey.pem',
-            'cert': 'cert.pem'
-        }
-
-        # Adicionar monitor se não for auto
-        if selected_monitor != 'auto':
-            sunshine_config['output_name'] = selected_monitor
-
-        # Adicionar adapter_name se for vaapi e não auto
-        if selected_gpu_info['encoder'] == 'vaapi' and selected_gpu_info['adapter'] != 'auto':
-            sunshine_config['adapter_name'] = selected_gpu_info['adapter']
-
-        # Detecção de Plataforma
-        selected_platform_idx = self.platform_row.get_selected()
-        platforms = ['auto', 'wayland', 'x11', 'kms']
-        platform = platforms[selected_platform_idx]
-
-        import os
-        if platform == 'auto':
-            session_type = os.environ.get('XDG_SESSION_TYPE', '').lower()
-            if session_type == 'wayland':
-                platform = 'wayland'
-            elif session_type == 'x11':
-                platform = 'x11'
-            else:
-                platform = 'x11' # Fallback more likely to work
-        
-        sunshine_config['platform'] = platform
-        
-        if platform == 'wayland':
-            # Tentar detectar display correto
-            wayland_disp = os.environ.get('WAYLAND_DISPLAY')
-            if wayland_disp:
-                sunshine_config['wayland.display'] = wayland_disp
-            else:
-                 # Se não detectar, tentar padrão comum ou não setar (deixar Sunshine descobrir)
-                 # Mas como o erro sugere falha, vamos tentar wayland-0 apenas se nada for achado
-                 sunshine_config['wayland.display'] = 'wayland-0'
-                 
-        elif platform == 'x11':
-             # Garantir DISPLAY :0 no conf se for X11
-             if selected_monitor == 'auto':
-                 sunshine_config['output_name'] = ':0'
-        
-        # Se for NVIDIA, podemos adicionar presets específicos se Sunshine suportar via conf
-        # Mas mantendo o básico solicitado pelo usuário
-        
-        # Tentar iniciar Sunshine
         try:
+            # Se já estiver rodando, reinicia para aplicar configs
+            if self.sunshine.is_running():
+                print("Reiniciando Sunshine para aplicar configurações...")
+                self.sunshine.stop()
+                import time
+                time.sleep(1) # Wait for port release
+            
+            # Gerar PIN
+            self.pin_code = ''.join(random.choices(string.digits, k=6))
+            
+            # Start PIN Listener
+            from utils.network import NetworkDiscovery
+            hostname = socket.gethostname()
+            self.stop_pin_listener = NetworkDiscovery().start_pin_listener(self.pin_code, hostname)
+            
+            # Get IP
+            # User requested localhost
+            ip_address = 'localhost'
+            
+            # === Configurar Apps (games) ===
+            mode_idx = self.game_mode_row.get_selected()
+            apps_config = []
+            
+            # 0=Desktop, 1=Steam, 2=Lutris, 3=Custom
+            if mode_idx == 0:
+                # Desktop Completo
+                pass
+                
+            elif mode_idx in [1, 2]: # Steam, Lutris
+                # Pegar jogo selecionado
+                idx = self.game_list_row.get_selected()
+                if idx != Gtk.INVALID_LIST_POSITION:
+                    # Re-obter a lista atual baseada no modo
+                    platform_map = {1: 'Steam', 2: 'Lutris'}
+                    plat = platform_map[mode_idx]
+                    games = self.detected_games.get(plat, [])
+                    
+                    if 0 <= idx < len(games):
+                        game = games[idx]
+                        apps_config.append({
+                            "name": game['name'],
+                            "cmd": game['cmd'],
+                            "detached": True, 
+                        })
+                        
+            elif mode_idx == 3: # Custom
+                name = self.custom_name_entry.get_text()
+                cmd = self.custom_cmd_entry.get_text()
+                if name and cmd:
+                    apps_config.append({
+                        "name": name,
+                        "cmd": cmd,
+                        "detached": True
+                    })
+            
+            # Atualizar apps.json
+            if apps_config:
+                self.sunshine.update_apps(apps_config)
+            else:
+                # Se vazio (Desktop), podemos limpar ou forçar Desktop
+                # Se for desktop, melhor ter uma entrada explícita ou limpar
+                # Para limpar podemos passar lista vazia, Sunshine fallback para Desktop ou lista vazia?
+                # Sunshine precisa de pelo menos um app ou Desktop. 
+                # Se passarmos lista vazia para apps.json, ele pode não mostrar nada.
+                # Vamos criar entrada Desktop explícita se for Desktop
+                if mode_idx == 0:
+                     self.sunshine.update_apps([{
+                         "name": "Desktop",
+                         "cmd": "bash -c 'sleep 5'", # Comando dummy, Sunshine captura tela independente
+                         # Na verdade, Sunshine tem app type específico ou apenas captura.
+                         # Geralmente para Desktop, não precisamos de cmd específico se for só espelhamento.
+                         # Mas Sunshine requer 'cmd'. O padrão do Sunshine é cmd 'noop' ou similar?
+                         # Vamos usar um comando que não faz nada mas mantém sessão viva se necessário?
+                         # Não, para Desktop, o Sunshine geralmente ignora cmd se configurado corretamente?
+                         # Na doc: "Desktop" app usually has checking for empty commands?
+                         # Vamos usar o padrão seguro.
+                         "prep-cmd": []
+                     }])
+                     # Hack: Se apps.json tiver app sem "cmd", ele pode falhar?
+                     # Melhor estratégia para Desktop: Adicionar um app que não fecha instantaneamente?
+                     # Ou simplesmente não atualizar apps.json e deixar o que estava? Não.
+                     # Vamos adicionar um app "Desktop" padrão.
+                     self.sunshine.update_apps([{
+                         "name": "Desktop",
+                         "detached": ["true"],
+                         "cmd": "true" 
+                         # 'true' retorna 0 imediatamente. Se detached, ok.
+                     }])
+                     
+            # Configurar Sunshine com as opções da UI
+            quality_map = {
+                0: {'bitrate': 5000, 'fps': 30},   # Baixa
+                1: {'bitrate': 10000, 'fps': 30},  # Média
+                2: {'bitrate': 20000, 'fps': 60},  # Alta
+                3: {'bitrate': 30000, 'fps': 60},  # Ultra
+                4: {'bitrate': 40000, 'fps': 60},  # Máxima
+            }
+            
+            quality_settings = quality_map.get(self.quality_row.get_selected(), {'bitrate': 20000, 'fps': 60})
+            
+            # Configurações de hardware
+            selected_monitor = self.available_monitors[self.monitor_row.get_selected()][1]
+            selected_gpu_info = self.available_gpus[self.gpu_row.get_selected()]
+            
+            sunshine_config = {
+                'encoder': selected_gpu_info['encoder'],
+                'bitrate': quality_settings['bitrate'],
+                'fps': quality_settings['fps'],
+                'videocodec': 'h264',
+                'audio': 'pulse',
+                'gamepad': 'x360',
+                'min_threads': 1,
+                'min_log_level': 4,
+                # Caminhos relativos (usando CWD definido no manager)
+                'pkey': 'pkey.pem',
+                'cert': 'cert.pem'
+            }
+    
+            # Adicionar monitor se não for auto
+            if selected_monitor != 'auto':
+                sunshine_config['output_name'] = selected_monitor
+    
+            # Adicionar adapter_name se for vaapi e não auto
+            if selected_gpu_info['encoder'] == 'vaapi' and selected_gpu_info['adapter'] != 'auto':
+                sunshine_config['adapter_name'] = selected_gpu_info['adapter']
+    
+            # Detecção de Plataforma
+            selected_platform_idx = self.platform_row.get_selected()
+            platforms = ['auto', 'wayland', 'x11', 'kms']
+            platform = platforms[selected_platform_idx]
+    
+            import os
+            if platform == 'auto':
+                session_type = os.environ.get('XDG_SESSION_TYPE', '').lower()
+                if session_type == 'wayland':
+                    platform = 'wayland'
+                elif session_type == 'x11':
+                    platform = 'x11'
+                else:
+                    platform = 'x11' # Fallback more likely to work
+            
+            sunshine_config['platform'] = platform
+            
+            if platform == 'wayland':
+                # Tentar detectar display correto
+                wayland_disp = os.environ.get('WAYLAND_DISPLAY')
+                if wayland_disp:
+                    sunshine_config['wayland.display'] = wayland_disp
+                else:
+                     # Se não detectar, tentar padrão comum ou não setar (deixar Sunshine descobrir)
+                     # Mas como o erro sugere falha, vamos tentar wayland-0 apenas se nada for achado
+                     sunshine_config['wayland.display'] = 'wayland-0'
+                     
+            elif platform == 'x11':
+                 # Garantir DISPLAY :0 no conf se for X11
+                 if selected_monitor == 'auto':
+                     sunshine_config['output_name'] = ':0'
+            
+            # Se for NVIDIA, podemos adicionar presets específicos se Sunshine suportar via conf
+            # Mas mantendo o básico solicitado pelo usuário
+            
+            # Tentar iniciar Sunshine
+            
             # Aplicar configurações antes de iniciar
             self.sunshine.configure(sunshine_config)
             
@@ -695,9 +839,17 @@ class HostView(Gtk.Box):
         except Exception as e:
             self.show_error_dialog('Erro Inesperado', 
                 f'Ocorreu um erro ao iniciar o servidor:\n{str(e)}')
+            
+        finally:
+            self.loading_bar.set_visible(False)
         
-    def stop_hosting(self):
+    def stop_hosting(self, b=None):
         """Para o servidor"""
+        self.loading_bar.set_visible(True)
+        context = GLib.MainContext.default()
+        while context.pending():
+            context.iteration(False)
+            
         # Stop PIN Listener
         if hasattr(self, 'stop_pin_listener'):
             self.stop_pin_listener()
@@ -717,6 +869,7 @@ class HostView(Gtk.Box):
         
         self.is_hosting = False
         self.sync_ui_state()
+        self.loading_bar.set_visible(False)
         
         self.show_toast('Servidor parado')
         
@@ -796,9 +949,75 @@ class HostView(Gtk.Box):
     def open_sunshine_config(self, button):
         """Abre configuração do Sunshine"""
         # Abrir web UI do Sunshine
-        import webbrowser
-        # Sunshine uses HTTPS on port 47990 by default for Web UI
-        webbrowser.open('https://localhost:47990')
+        # import webbrowser
+        import subprocess
+        subprocess.Popen(['xdg-open', 'https://localhost:47990'])
+
+    def on_game_mode_changed(self, row, param):
+        """Callback quando modo de jogo muda"""
+        idx = row.get_selected()
+        
+        # 0=Desktop, 1=Steam, 2=Lutris, 3=Custom
+        
+        if idx == 0: # Desktop
+            self.platform_games_expander.set_visible(False)
+            self.platform_games_expander.set_expanded(False)
+            
+            self.custom_app_expander.set_visible(False)
+            self.custom_app_expander.set_expanded(False)
+            
+        elif idx == 3: # Custom
+            self.platform_games_expander.set_visible(False)
+            self.platform_games_expander.set_expanded(False)
+            
+            self.custom_app_expander.set_visible(True)
+            self.custom_app_expander.set_expanded(True)
+            
+        else: # Platforms
+            self.custom_app_expander.set_visible(False)
+            self.custom_app_expander.set_expanded(False)
+            
+            self.platform_games_expander.set_visible(True)
+            self.platform_games_expander.set_expanded(True)
+            
+            # Update title based on platform
+            platforms = {1: 'Steam', 2: 'Lutris'}
+            plat = platforms.get(idx, 'Jogos')
+            self.platform_games_expander.set_title(f"Jogos da {plat}")
+            
+            self.populate_game_list(idx)
+            
+    def populate_game_list(self, mode_idx):
+        """Popula lista de jogos da plataforma selecionada"""
+        platform_map = {1: 'Steam', 2: 'Lutris'}
+        plat = platform_map.get(mode_idx)
+        
+        if not plat: return
+        
+        # Detectar se vazio
+        if not self.detected_games[plat]:
+             self.show_toast(f"Procurando jogos {plat}...")
+             # Executar síncrono por simplicidade (rápido o suficiente geralmente)
+             # Idealmente seria async
+             if plat == 'Steam':
+                 self.detected_games['Steam'] = self.game_detector.detect_steam()
+             elif plat == 'Lutris':
+                 self.detected_games['Lutris'] = self.game_detector.detect_lutris()
+                 
+        games = self.detected_games[plat]
+        
+        # Atualizar modelo da lista
+        # Precisamos recriar o modelo ou limpar
+        new_model = Gtk.StringList()
+        if not games:
+            new_model.append(f"Nenhum jogo encontrado no {plat}")
+        else:
+            for game in games:
+                new_model.append(game['name'])
+                
+        self.game_list_row.set_model(new_model)
+        self.game_list_model = new_model # Keep ref
+        self.game_list_model = new_model # Keep ref
 
     def cleanup(self):
         """Limpa recursos ao fechar"""

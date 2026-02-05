@@ -13,7 +13,7 @@ depends=(
     'libadwaita'
     'python-dbus'
     'avahi'
-    'sunshine-bin'
+    'sunshine'
     'moonlight-qt'
 )
 optdepends=(

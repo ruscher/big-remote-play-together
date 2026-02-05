@@ -84,7 +84,7 @@ class InstallerWindow(Adw.Window):
         box.append(self.close_btn)
 
     def start_external_installation(self):
-        install_cmd = "yay -S --noconfirm --needed sunshine-bin moonlight-qt vte4"
+        install_cmd = "yay -S --noconfirm --needed sunshine moonlight-qt vte4"
         shell_cmd = f"{install_cmd}; echo ''; echo 'Instalação concluída! Pressione Enter para fechar...'; read"
         
         terminals = [
@@ -116,7 +116,7 @@ class InstallerWindow(Adw.Window):
         
     def start_installation(self):
         # Command to run
-        cmd = ['yay', '-S', '--noconfirm', '--needed', 'sunshine-bin', 'moonlight-qt']
+        cmd = ['yay', '-S', '--noconfirm', '--needed', 'sunshine', 'moonlight-qt']
         
         self.status_label.set_text('Executando instalação... (Pode pedir senha de sudo)')
         

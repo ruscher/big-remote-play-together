@@ -4,6 +4,8 @@
 
 Inspirado no Steam Remote Play Together e Parsec, utilizando Sunshine (host) e Moonlight (guest).
 
+Baseado no vídeo: https://www.youtube.com/watch?v=D2l9o_wXW5M
+
 ## 🎮 Características
 
 - ✨ Interface moderna GTK 4 com Adwaita
@@ -25,7 +27,7 @@ Inspirado no Steam Remote Play Together e Parsec, utilizando Sunshine (host) e M
 
 ### Dependências Principais
 ```bash
-sunshine-bin
+sunshine
 moonlight-qt
 python-gobject
 gtk4
@@ -48,7 +50,7 @@ chmod +x scripts/big-remoteplay-install.sh
 sudo pacman -S python-gobject gtk4 libadwaita python-dbus avahi
 
 # Instalar Sunshine (AUR)
-yay -S sunshine-bin
+yay -S sunshine
 
 # Instalar Moonlight
 yay -S moonlight-qt

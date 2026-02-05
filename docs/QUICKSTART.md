@@ -89,7 +89,7 @@ firefox http://localhost:47989
 ### "Componentes não encontrados"
 ```bash
 # Instalar Sunshine
-yay -S sunshine-bin
+yay -S sunshine
 
 # Instalar Moonlight
 yay -S moonlight-qt

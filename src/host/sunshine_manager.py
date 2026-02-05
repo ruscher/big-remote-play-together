@@ -206,6 +206,34 @@ class SunshineHost:
             'config_dir': str(self.config_dir),
         }
         
+    def update_apps(self, apps_list: list) -> bool:
+        """
+        Atualiza a lista de aplicativos (apps.json)
+        
+        Args:
+            apps_list: Lista de dicionários descrevendo os apps
+                       Ex: [{'name': 'Steam', 'cmd': 'steam', ...}]
+        """
+        try:
+            import json
+            apps_file = self.config_dir / 'apps.json'
+            
+            # Formato do apps.json do Sunshine
+            data = {
+                "env": {
+                    "PATH": "$(PATH):$(HOME)/.local/bin"
+                },
+                "apps": apps_list
+            }
+            
+            with open(apps_file, 'w') as f:
+                json.dump(data, f, indent=4)
+                
+            return True
+        except Exception as e:
+            print(f"Erro ao salvar apps.json: {e}")
+            return False
+
     def configure(self, settings: dict) -> bool:
         """
         Configura Sunshine
@@ -215,6 +243,10 @@ class SunshineHost:
         """
         try:
             config_file = self.config_dir / 'sunshine.conf'
+            
+            # Garantir que apontamos para o apps.json
+            if 'apps_file' not in settings:
+                settings['apps_file'] = 'apps.json'
             
             with open(config_file, 'w') as f:
                 for key, value in settings.items():

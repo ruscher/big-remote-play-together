@@ -128,13 +128,18 @@ class BigRemotePlayApp(Adw.Application):
             application_icon='big-remote-play-together',
             developer_name='Rafael Ruscher',
             version='1.0.0',
-            developers=['Rafael Ruscher <rruscher@gmail.com>'],
-            copyright='© 2024 BigLinux',
+            developers=[
+                'Rafael Ruscher <rruscher@gmail.com>',
+                'Alexasandro Pacheco Feliciano @pachecogameroficial',
+                'Alessandro e Silva Xavier @alessandro741'
+            ],
+            copyright='© 2026 BigLinux',
             license_type=Gtk.License.GPL_3_0,
             website='https://www.biglinux.com.br',
             issue_url='https://github.com/biglinux/big-remoteplay-together/issues',
             comments='Sistema integrado de jogo cooperativo remoto\nInspirado no Steam Remote Play Together',
         )
+        about.add_link("Youtube", "https://www.youtube.com/watch?v=D2l9o_wXW5M")
         about.present()
         
     def show_preferences(self, *args):
