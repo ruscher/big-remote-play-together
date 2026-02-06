@@ -58,11 +58,20 @@ class MoonlightClient:
                 cmd.extend(['--bitrate', str(kwargs['bitrate'])])
                 
             # Display Mode
-            display_mode = kwargs.get('display_mode', 'borderless-windowed')
+            display_mode = kwargs.get('display_mode', 'borderless')
             cmd.extend(['--display-mode', display_mode])
                 
-            # Audio (moonlight-qt não tem flag simples de no-audio explicita no help,
-            # assumindo padrão ligado. Se quiser desligar, teria que configurar sistema)
+            # Audio
+            # Padrão: Streaming de áudio ativado (toca no cliente, mudo no host)
+            if kwargs.get('audio', True):
+                # Forçar desligar audio no host para garantir streaming
+                cmd.append('--no-audio-on-host')
+            else:
+                # Se desativado, tocar no host (não streamar/tocar no cliente)
+                cmd.append('--audio-on-host')
+
+            print(f"DEBUG: Connecting with options: resolution={kwargs.get('width')}x{kwargs.get('height')}, fps={kwargs.get('fps')}, audio={kwargs.get('audio', True)}")
+            print(f"DEBUG: Full command: {' '.join(cmd)}")
             
             if kwargs.get('hw_decode', True):
                 cmd.extend(['--video-decoder', 'hardware'])

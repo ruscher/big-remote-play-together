@@ -1,0 +1,93 @@
+00:00:00 - SDL Info (0): Compiled with SDL 2.32.56
+00:00:00 - SDL Info (0): Running with SDL 2.32.62
+00:00:00 - SDL Info (0): Detected Wayland
+Uso: moonlight [opções] stream <host> "<app>"
+
+Starts directly streaming a given app.
+
+Opções:
+  -h, --help                                   Mostra a ajuda nas opções da
+                                               linha de comando.
+  --help-all                                   Displays help, including generic
+                                               Qt options.
+  -v, --version                                Mostra informações sobre a
+                                               versão.
+  --720                                        Use 1280x720 resolution.
+  --1080                                       Use 1920x1080 resolution.
+  --1440                                       Use 2560x1440 resolution.
+  --4K                                         Use 3840x2160 resolution.
+  --resolution <resolution>                    Specify custom <width>x<height>
+                                               resolution to use.
+  --vsync                                      Use V-Sync.
+  --no-vsync                                   Do not use V-Sync.
+  --fps <fps>                                  Specify FPS to use.
+  --bitrate <bitrate>                          Specify bitrate in Kbps to use.
+  --packet-size <packet-size>                  Specify video packet size to
+                                               use.
+  --display-mode <display-mode>                Select display mode:
+                                               borderless/fullscreen/windowed.
+  --audio-config <audio-config>                Select audio config:
+                                               5.1-surround/7.1-surround/stereo.
+  --multi-controller                           Use multiple controller support.
+  --no-multi-controller                        Do not use multiple controller
+                                               support.
+  --quit-after                                 Use quit app after session.
+  --no-quit-after                              Do not use quit app after
+                                               session.
+  --absolute-mouse                             Use remote desktop optimized
+                                               mouse control.
+  --no-absolute-mouse                          Do not use remote desktop
+                                               optimized mouse control.
+  --mouse-buttons-swap                         Use left and right mouse buttons
+                                               swap.
+  --no-mouse-buttons-swap                      Do not use left and right mouse
+                                               buttons swap.
+  --touchscreen-trackpad                       Use touchscreen in trackpad
+                                               mode.
+  --no-touchscreen-trackpad                    Do not use touchscreen in
+                                               trackpad mode.
+  --game-optimization                          Use game optimizations.
+  --no-game-optimization                       Do not use game optimizations.
+  --audio-on-host                              Use audio on host PC.
+  --no-audio-on-host                           Do not use audio on host PC.
+  --frame-pacing                               Use frame pacing.
+  --no-frame-pacing                            Do not use frame pacing.
+  --mute-on-focus-loss                         Use mute audio when Moonlight
+                                               window loses focus.
+  --no-mute-on-focus-loss                      Do not use mute audio when
+                                               Moonlight window loses focus.
+  --background-gamepad                         Use background gamepad input.
+  --no-background-gamepad                      Do not use background gamepad
+                                               input.
+  --reverse-scroll-direction                   Use inverted scroll direction.
+  --no-reverse-scroll-direction                Do not use inverted scroll
+                                               direction.
+  --swap-gamepad-buttons                       Use swap A/B and X/Y gamepad
+                                               buttons (Nintendo-style).
+  --no-swap-gamepad-buttons                    Do not use swap A/B and X/Y
+                                               gamepad buttons (Nintendo-style).
+  --keep-awake                                 Use prevent display sleep while
+                                               streaming.
+  --no-keep-awake                              Do not use prevent display sleep
+                                               while streaming.
+  --performance-overlay                        Use show performance overlay.
+  --no-performance-overlay                     Do not use show performance
+                                               overlay.
+  --hdr                                        Use HDR streaming.
+  --no-hdr                                     Do not use HDR streaming.
+  --yuv444                                     Use YUV 4:4:4 sampling, if
+                                               supported.
+  --no-yuv444                                  Do not use YUV 4:4:4 sampling,
+                                               if supported.
+  --capture-system-keys <capture-system-keys>  Select capture system key
+                                               combos: always/fullscreen/never.
+  --video-codec <video-codec>                  Select video codec:
+                                               AV1/H.264/HEVC/auto.
+  --video-decoder <video-decoder>              Select video decoder:
+                                               auto/hardware/software.
+
+Argumentos:
+  stream                                       Start stream
+  host                                         Host computer name, UUID, or IP
+                                               address
+  app                                          App to stream

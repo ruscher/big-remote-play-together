@@ -189,20 +189,22 @@ class HostView(Gtk.Box):
         self.loading_bar.set_visible(False)
         content.append(self.loading_bar)
         
-        # Header
-        header = Adw.PreferencesGroup()
-        header.set_title('Hospedar Jogo')
-        header.set_description('Configure e compartilhe seu jogo com amigos')
-        
-        # Server status card
-        self.status_card = self.create_status_card()
-        header.add(self.status_card)
-        
-        # Performance monitor
+        # Performance Monitor (Chart) - Moved below Header
         from .performance_monitor import PerformanceMonitor
         self.perf_monitor = PerformanceMonitor()
-        self.perf_monitor.set_visible(False)  # Oculto até servidor iniciar
-        header.add(self.perf_monitor)
+        self.perf_monitor.set_visible(True) # Always visible
+        # content.append(self.perf_monitor) -- Removed immediate append, done later
+        # Initialize default state
+        self.perf_monitor.set_connection_status("Localhost", "Sunshine Offline", False)
+        
+        # Header
+        self.header = Adw.PreferencesGroup()
+        self.header.set_title('Hospedar Servidor')
+        self.header.set_description('Configure e compartilhe seu jogo para seus amigos conectarem')
+        
+        # Server status card removed (Integrated into PerfMonitor)
+        
+        # Performance monitor removed from here (moved to top)
         
         # Game selection
         game_group = Adw.PreferencesGroup()
@@ -407,10 +409,11 @@ class HostView(Gtk.Box):
         
         game_group.add(self.advanced_expander)
         
-        # Action buttons
+        # Action buttons (Moved up)
         button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         button_box.set_halign(Gtk.Align.CENTER)
-        button_box.set_margin_top(24)
+        button_box.set_margin_top(12)
+        button_box.set_margin_bottom(24)
         
         self.start_button = Gtk.Button(label='Iniciar Servidor')
         self.start_button.add_css_class('pill')
@@ -426,10 +429,17 @@ class HostView(Gtk.Box):
         button_box.append(self.start_button)
         button_box.append(self.configure_button)
         
-        # Add all to content
-        content.append(header)
-        content.append(game_group)
+        # Create Summary Box
+        self.create_summary_box()
+        
+        # Add all to content (Reordered)
+        # 1. Header ("Hospedar Servidor") - Fixed at top
+        # 2. Perf Monitor ("Monitoramento em Tempo Real")
+        content.append(self.header)
+        content.append(self.perf_monitor) # Moved below header
         content.append(button_box)
+        content.append(self.summary_box)
+        content.append(game_group)
         
         clamp.set_child(content)
         
@@ -439,7 +449,23 @@ class HostView(Gtk.Box):
         scroll.set_child(clamp)
         
         self.append(scroll)
+
+    def create_summary_box(self):
+        """Cria grupo de informações do servidor (Boxed style)"""
+        self.summary_box = Adw.PreferencesGroup()
+        self.summary_box.set_title("Informações do Servidor")
+        self.summary_box.set_margin_top(12)
+        self.summary_box.set_visible(False)
+        self.field_widgets = {}
         
+        # Fields with icons
+        self.create_masked_row('Nome do Host', 'hostname', 'computer-symbolic', default_revealed=True)
+        self.create_masked_row('IPv4', 'ipv4', 'network-wired-symbolic')
+        self.create_masked_row('IPv6', 'ipv6', 'network-wired-symbolic')
+        self.create_masked_row('IPv4 Global', 'ipv4_global', 'network-transmit-receive-symbolic')
+        self.create_masked_row('IPv6 Global', 'ipv6_global', 'network-transmit-receive-symbolic')
+        self.create_masked_row('PIN', 'pin', 'dialog-password-symbolic')
+
     def load_audio_outputs(self):
         """Carrega dispositivos de áudio"""
         try:
@@ -467,105 +493,24 @@ class HostView(Gtk.Box):
             self.audio_output_model = Gtk.StringList()
             self.audio_output_model.append("Erro ao carregar áudio")
             self.audio_output_row.set_model(self.audio_output_model)
-        
-    def create_status_card(self):
-        """Cria card de status do servidor"""
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        box.add_css_class('card')
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
-        
-        # Status header (Icon + Status Text)
-        status_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        status_header.set_margin_top(12)
-        status_header.set_margin_start(12)
-        status_header.set_margin_bottom(12)
-        
-        self.status_icon = Gtk.Image.new_from_icon_name('network-idle-symbolic')
-        self.status_icon.set_pixel_size(32)
-        
-        status_text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.status_label = Gtk.Label(label='Servidor Inativo')
-        self.status_label.set_halign(Gtk.Align.START)
-        self.status_label.add_css_class('title-3')
-        
-        self.status_sublabel = Gtk.Label(label='Inicie o servidor para aceitar conexões')
-        self.status_sublabel.set_halign(Gtk.Align.START)
-        self.status_sublabel.add_css_class('dim-label')
-        
-        status_text_box.append(self.status_label)
-        status_text_box.append(self.status_sublabel)
-        
-        status_header.append(self.status_icon)
-        status_header.append(status_text_box)
-        
-        box.append(status_header)
-        
-        # === Summary Box (Active Mode) ===
-        self.summary_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.summary_box.set_margin_bottom(16)
-        self.summary_box.set_margin_start(12)
-        self.summary_box.set_margin_end(12)
-        self.summary_box.set_visible(False)
-        
-        # Sunshine Status
-        sunshine_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        sunshine_lbl = Gtk.Label(label='Sunshine:')
-        sunshine_lbl.add_css_class('dim-label')
-        sunshine_lbl.set_halign(Gtk.Align.START)
-        
-        self.sunshine_val = Gtk.Label(label='On-line')
-        self.sunshine_val.add_css_class('success')
-        self.sunshine_val.set_halign(Gtk.Align.START)
-        
-        sunshine_row.append(sunshine_lbl)
-        sunshine_row.append(self.sunshine_val)
-        self.summary_box.append(sunshine_row)
-        
-        # Field widgets storage
-        self.field_widgets = {}
-        
-        # Fields to display
-        self.create_masked_row('Nome do Host', 'hostname')
-        self.create_masked_row('IPv4', 'ipv4')
-        self.create_masked_row('IPv6', 'ipv6')
-        self.create_masked_row('IPv4 Global', 'ipv4_global')
-        self.create_masked_row('IPv6 Global', 'ipv6_global')
-        
-        # PIN needs to be visible mostly
-        self.create_masked_row('PIN', 'pin')
-        
-        box.append(self.summary_box)
-        
-        # Start periodic check
-        GLib.timeout_add_seconds(5, self.update_status_info)
-        # self.update_status_info() # Initial check - Removed to avoid early calls
 
-        return box
+    def create_masked_row(self, title, key, icon_name='text-x-generic-symbolic', default_revealed=False):
+        """Cria linha Adw.ActionRow com campo mascarado"""
+        row = Adw.ActionRow()
+        row.set_title(title)
+        row.set_icon_name(icon_name)
         
-    def create_masked_row(self, title, key):
-        """Cria linha com campo mascarado (olho) e copy"""
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        # Widget container for suffix
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.set_valign(Gtk.Align.CENTER)
         
-        # Title
-        label = Gtk.Label(label=f"{title}:")
-        label.add_css_class('dim-label')
-        label.set_halign(Gtk.Align.START)
-        label.set_width_chars(15) 
-        label.set_xalign(0)
-        
-        # Value
-        value_lbl = Gtk.Label(label='••••••')
-        value_lbl.set_halign(Gtk.Align.START)
-        value_lbl.set_hexpand(True)
-        value_lbl.set_xalign(0)
-        value_lbl.set_selectable(True)
+        # Value Label
+        value_lbl = Gtk.Label(label='••••••' if not default_revealed else '')
+        value_lbl.set_margin_end(8)
+        # value_lbl.add_css_class('monospace') # Optional
         
         # Eye button
-        eye_btn = Gtk.Button(icon_name='find-location-symbolic') # Eye icon equivalent
-        eye_btn.set_icon_name('view-reveal-symbolic') # Better eye icon
+        eye_btn = Gtk.Button(icon_name='view-reveal-symbolic' if not default_revealed else 'view-conceal-symbolic')
         eye_btn.add_css_class('flat')
         eye_btn.set_tooltip_text('Mostrar/Ocultar')
         
@@ -574,18 +519,18 @@ class HostView(Gtk.Box):
         copy_btn.add_css_class('flat')
         copy_btn.set_tooltip_text('Copiar')
         
-        row.append(label)
-        row.append(value_lbl)
-        row.append(eye_btn)
-        row.append(copy_btn)
+        box.append(value_lbl)
+        box.append(eye_btn)
+        box.append(copy_btn)
         
-        self.summary_box.append(row)
+        row.add_suffix(box)
+        self.summary_box.add(row)
         
         # Store widgets and state
         self.field_widgets[key] = {
             'label': value_lbl,
             'real_value': '',
-            'revealed': False, 
+            'revealed': default_revealed, 
             'btn_eye': eye_btn
         }
         
@@ -625,35 +570,60 @@ class HostView(Gtk.Box):
     def sync_ui_state(self):
         """Sincroniza UI com estado interno"""
         if self.is_hosting:
-            self.status_icon.set_from_icon_name('network-server-symbolic')
-            self.status_label.set_text('Servidor Ativo')
-            self.status_sublabel.set_text('Servidor rodando e pronto para conexões')
+            self.perf_monitor.set_connection_status("Sunshine", "Ativo - Aguardando Conexões", True)
+            self.perf_monitor.set_visible(True)
+            self.perf_monitor.start_monitoring()
             
-            self.summary_box.set_visible(True)
+            # self.summary_box.set_visible(True) # Removed as create_status_card used it? 
+            # We need to render summary somewhere? 
+            # The user asked: "as informações ... pode ficar integrado no gráfico"
+            # But the summary box contains IP/PIN.
+            # PerformanceMonitor doesn't have fields for IP/Pin yet.
+            # Maybe keep summary box separate or append it below graph?
+            # For now, let's re-add summary box to content if needed or assume user wants it GONE.
+            # "as informações como Sunshine On-line pode fica e mostra quando alguem conectar pode ficar integrado no gráfico, quando Sunshine estiver On-line mude no Gráfico para Ativo e verde."
+            
+            # Summary Box (IPs, PIN) MUST BE VISIBLE somewhere.
+            # If I deleted create_status_card, I deleted summary_box too!
+            # I should recreate summary_box in setup_ui separately if needed.
             
             self.start_button.set_label('Parar Servidor')
             self.start_button.remove_css_class('suggested-action')
             self.start_button.add_css_class('destructive-action')
             
-            self.perf_monitor.set_visible(True)
-            self.perf_monitor.start_monitoring()
+            self.header.set_visible(True) # Always visible
             
-            # Populate fields
-            self.populate_summary_fields()
+            self.configure_button.set_sensitive(True)
+            self.configure_button.add_css_class('suggested-action')
+            self.game_mode_row.set_sensitive(False)
+            self.hardware_expander.set_sensitive(False)
+            self.streaming_expander.set_sensitive(False)
+            self.advanced_expander.set_sensitive(False)
+            
+            if hasattr(self, 'summary_box'):
+                 self.summary_box.set_visible(True)
+                 self.populate_summary_fields()
             
         else:
-            self.status_icon.set_from_icon_name('network-idle-symbolic')
-            self.status_label.set_text('Servidor Inativo')
-            self.status_sublabel.set_text('Inicie o servidor para aceitar conexões')
+            self.perf_monitor.set_connection_status("Sunshine", "Inativo", False)
+            self.perf_monitor.stop_monitoring()
+            self.perf_monitor.set_visible(True)
             
-            self.summary_box.set_visible(False)
+            self.header.set_visible(True) # Show header when not hosting
+            
+            if hasattr(self, 'summary_box'):
+                self.summary_box.set_visible(False)
             
             self.start_button.set_label('Iniciar Servidor')
             self.start_button.remove_css_class('destructive-action')
             self.start_button.add_css_class('suggested-action')
             
-            self.perf_monitor.stop_monitoring()
-            self.perf_monitor.set_visible(False)
+            self.configure_button.set_sensitive(False)
+            self.configure_button.remove_css_class('suggested-action')
+            self.game_mode_row.set_sensitive(True)
+            self.hardware_expander.set_sensitive(True)
+            self.streaming_expander.set_sensitive(True)
+            self.advanced_expander.set_sensitive(True)
 
     def populate_summary_fields(self):
         """Preenche campos do resumo"""
@@ -844,8 +814,13 @@ class HostView(Gtk.Box):
             # ----------------------------------
     
             # Adicionar monitor se não for auto
-            if selected_monitor != 'auto':
-                sunshine_config['output_name'] = selected_monitor
+            # Adicionar monitor se não for auto
+            # Usar índice sequencial parece ser mais robusto que nomes complexos no Sunshine
+            monitor_idx = self.monitor_row.get_selected()
+            if monitor_idx > 0:
+                 # Auto é 0, então Monitor 1 é index 1 na lista (0 no Sunshine?)
+                 # Vamos tentar passar o índice numérico (0, 1, 2...)
+                 sunshine_config['output_name'] = int(monitor_idx - 1)
     
             # Adicionar adapter_name se for vaapi e não auto
             if selected_gpu_info['encoder'] == 'vaapi' and selected_gpu_info['adapter'] != 'auto':
@@ -901,6 +876,11 @@ class HostView(Gtk.Box):
             
             # Update UI
             self.is_hosting = True
+            
+            # Start monitoring
+            self.perf_monitor.set_visible(True)
+            self.perf_monitor.start_monitoring()
+
             # self.pin_display and self.ip_display removed
             
             self.sync_ui_state()
@@ -946,6 +926,7 @@ class HostView(Gtk.Box):
         self.is_hosting = False
         self.sync_ui_state()
         self.loading_bar.set_visible(False)
+        
         
         self.show_toast('Servidor parado')
         
