@@ -276,10 +276,11 @@ class SunshineHost:
         try:
             # Tentar enviar confirmação de senha também, pois o erro 400 sugere campos faltando.
             # Baseado no formulário web que exige confirmação.
+            # E nos IDs dos campos: usernameInput, passwordInput, confirmPasswordInput
             data_dict = {
-                "username": username, 
-                "password": password,
-                "passwordConfirm": password 
+                "usernameInput": username, 
+                "passwordInput": password,
+                "confirmPasswordInput": password 
             }
             data = json.dumps(data_dict).encode('utf-8')
             req = urllib.request.Request(url, data=data, headers=headers, method='POST')
