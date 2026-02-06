@@ -259,3 +259,31 @@ class SunshineHost:
             return False, f"Erro API: {e.code} - {e.reason}"
         except Exception as e:
             return False, f"Erro de Conexão: {e}"
+
+    def create_user(self, username, password) -> tuple[bool, str]:
+        """Cria um novo usuário administrativo no Sunshine via API"""
+        import urllib.request, ssl, json
+        
+        url = "https://localhost:47990/api/users"
+        headers = {
+            "Content-Type": "application/json",
+        }
+        
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        try:
+            data = json.dumps({"username": username, "password": password}).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+            
+            with urllib.request.urlopen(req, context=ctx, timeout=5) as response:
+                if response.status == 200:
+                    return True, "Usuário criado com sucesso"
+                return False, f"Status HTTP {response.status}"
+                
+        except urllib.error.HTTPError as e:
+            msg = e.read().decode('utf-8') if e.fp else e.reason
+            return False, f"Erro API: {e.code} - {msg}"
+        except Exception as e:
+            return False, f"Erro de Conexão: {e}"

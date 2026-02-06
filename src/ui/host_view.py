@@ -353,8 +353,64 @@ class HostView(Gtk.Box):
                 elif "Falha de Autenticação" in msg:
                     # Se falhar autenticação, pedir credenciais
                     self.open_sunshine_auth_dialog(pin)
+                elif "307" in msg:
+                    # Se retornar Redirect 307, significa que não tem usuário criado
+                    self.prompt_create_user(pin)
                 else:
                     self.show_error_dialog("Erro no PIN", msg)
+                
+        dialog.connect("response", on_response)
+        dialog.present()
+        
+    def prompt_create_user(self, pin_retry):
+        dialog = Adw.MessageDialog(heading="Usuário Não Encontrado", body="Nenhum usuário e senha foi criado para autenticar no Sunshine. Deseja criar agora?")
+        dialog.set_transient_for(self.get_root())
+        dialog.add_response("cancel", "Cancelar")
+        dialog.add_response("create", "Criar")
+        dialog.set_response_appearance("create", Adw.ResponseAppearance.SUGGESTED)
+        
+        def on_resp(d, r):
+            if r == "create":
+                self.open_create_user_dialog(pin_retry)
+        
+        dialog.connect("response", on_resp)
+        dialog.present()
+        
+    def open_create_user_dialog(self, pin_retry):
+        dialog = Adw.MessageDialog(heading="Criar Usuário Sunshine", body="Defina um nome de usuário e senha para o Sunshine.")
+        dialog.set_transient_for(self.get_root())
+        
+        grp = Adw.PreferencesGroup()
+        user_row = Adw.EntryRow(title="Novo Usuário")
+        user_row.set_text("admin")
+        pass_row = Adw.PasswordEntryRow(title="Nova Senha")
+        
+        grp.add(user_row); grp.add(pass_row)
+        dialog.set_extra_child(grp)
+        
+        dialog.add_response("cancel", "Cancelar")
+        dialog.add_response("save", "Salvar e Continuar")
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        
+        def on_create(d, r):
+            if r == "save":
+                user = user_row.get_text().strip()
+                pwd = pass_row.get_text().strip()
+                if not user or not pwd: return
+                
+                # Criar usuário
+                success, msg = self.sunshine.create_user(user, pwd)
+                if success:
+                    self.show_toast("Usuário criado!")
+                    # Tentar enviar PIN novamente com o novo usuario
+                    ok, p_msg = self.sunshine.send_pin(pin_retry, auth=(user, pwd))
+                    if ok: self.show_toast("PIN enviado com sucesso")
+                    else: self.show_error_dialog("Erro ao enviar PIN pós-criação", p_msg)
+                else:
+                    self.show_error_dialog("Erro ao criar usuário", msg)
+                    
+        dialog.connect("response", on_create)
+        dialog.present()
                 
         dialog.connect("response", on_response)
         dialog.present()
