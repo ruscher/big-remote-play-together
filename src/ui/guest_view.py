@@ -605,14 +605,12 @@ class GuestView(Gtk.Box):
             if pin:
                 # Atualizar texto com o PIN
                 body_text = (
-                    f'O Moonlight precisa ser pareado com o servidor.\n\n'
                     f'<span size="xx-large" weight="bold" color="accent-color">{pin}</span>\n\n'
-                    f'<b>Passos:</b>\n'
-                    f'1. Abra o Painel Sunshine\n'
-                    f'2. Vá na aba PIN\n'
-                    f'3. Digite o código acima e clique em Send'
+                    f'Informe o PIN e o Host para o Servidor de Hospedeiro.\n'
+                    f'O Servidor Hospedeiro precisa entrar em Configurações do Sunshine e incluir o PIN e Host para autorizar o compartilhamento.'
                 )
                 self.pairing_dialog.set_body(body_text)
+                self.pairing_dialog.set_title("Pareamento Necessário")
                 return
 
         # Fechar anteriores
@@ -632,12 +630,9 @@ class GuestView(Gtk.Box):
         
         if pin:
              body_text = (
-                f'O Moonlight precisa ser pareado com o servidor.\n\n'
                 f'<span size="xx-large" weight="bold" color="accent-color">{pin}</span>\n\n'
-                f'<b>Passos:</b>\n'
-                f'1. Abra o Painel Sunshine\n'
-                f'2. Vá na aba PIN\n'
-                f'3. Digite o código acima e clique em Send'
+                f'Informe o PIN e o Host para o Servidor de Hospedeiro.\n'
+                f'O Servidor Hospedeiro precisa entrar em Configurações do Sunshine e incluir o PIN e Host para autorizar o compartilhamento.'
             )
 
         self.pairing_dialog = Adw.MessageDialog(
