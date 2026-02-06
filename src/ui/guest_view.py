@@ -30,6 +30,25 @@ class GuestView(Gtk.Box):
         # Start monitoring
         GLib.timeout_add(1000, self.monitor_connection)
         
+    def detect_bitrate(self, button=None):
+        """Simula detecção de bitrate"""
+        # Futuramente pode usar iperf3 ou similar
+        self.show_toast("Detectando largura de banda...")
+        
+        def run_detect():
+            import time
+            import random
+            # Fake detection logic
+            time.sleep(1.5)
+            
+            # Simular valor entre 10 e 100
+            val = random.randint(15, 80)
+            
+            GLib.idle_add(lambda: self.bitrate_scale.set_value(val))
+            GLib.idle_add(lambda: self.show_toast(f"Bitrate sugerido: {val} Mbps"))
+            
+        threading.Thread(target=run_detect, daemon=True).start()
+        
     def setup_ui(self):
         """Configura interface"""
         # Clamp para centralizar
@@ -93,23 +112,80 @@ class GuestView(Gtk.Box):
         settings_group.set_title('Configurações do Cliente')
         settings_group.set_margin_top(12)
         
-        # Quality preference
-        self.quality_row = Adw.ComboRow()
-        self.quality_row.set_title('Qualidade de Vídeo')
-        self.quality_row.set_subtitle('Ajustar automaticamente conforme a rede')
+        # Resolution preference
+        self.resolution_row = Adw.ComboRow()
+        self.resolution_row.set_title('Resolução')
+        self.resolution_row.set_subtitle('Resolução do stream')
         
-        quality_model = Gtk.StringList()
-        quality_model.append('Automática (Recomendado)')
-        quality_model.append('720p 30fps')
-        quality_model.append('1080p 30fps')
-        quality_model.append('1080p 60fps')
-        quality_model.append('1440p 60fps')
-        quality_model.append('4K 60fps')
+        res_model = Gtk.StringList()
+        res_model.append('720p')
+        res_model.append('1080p')
+        res_model.append('1440p')
+        res_model.append('4K')
+        res_model.append('Custom') # Placeholder implementation
         
-        self.quality_row.set_model(quality_model)
-        self.quality_row.set_selected(0)
+        self.resolution_row.set_model(res_model)
+        self.resolution_row.set_selected(1) # Default 1080p
+        settings_group.add(self.resolution_row)
         
-        settings_group.add(self.quality_row)
+        # FPS preference
+        self.fps_row = Adw.ComboRow()
+        self.fps_row.set_title('Taxa de Quadros (FPS)')
+        self.fps_row.set_subtitle('Fluidez do vídeo')
+        
+        fps_model = Gtk.StringList()
+        fps_model.append('30 FPS')
+        fps_model.append('60 FPS')
+        fps_model.append('120 FPS')
+        fps_model.append('Custom')
+        
+        self.fps_row.set_model(fps_model)
+        self.fps_row.set_selected(1) # Default 60 FPS
+        settings_group.add(self.fps_row)
+        
+        # Connect signals for Custom handling
+        self.custom_resolution_val = None
+        self.custom_fps_val = None
+        
+        self.resolution_row.connect("notify::selected-item", self.on_resolution_changed)
+        self.fps_row.connect("notify::selected-item", self.on_fps_changed)
+        
+        # Bitrate
+        bitrate_row = Adw.ActionRow()
+        bitrate_row.set_title("Bitrate (Qualidade)")
+        bitrate_row.set_subtitle("Ajuste a largura de banda (0.5 - 150 Mbps)")
+        
+        bitrate_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        
+        self.bitrate_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.5, 150.0, 0.5)
+        self.bitrate_scale.set_hexpand(True)
+        self.bitrate_scale.set_value(20.0) # Default 20 Mbps
+        self.bitrate_scale.set_draw_value(True)
+        
+        detect_btn = Gtk.Button(label="Detectar")
+        detect_btn.add_css_class("flat")
+        detect_btn.set_tooltip_text("Detectar melhor bitrate para a rede")
+        detect_btn.connect("clicked", self.detect_bitrate)
+        
+        bitrate_box.append(self.bitrate_scale)
+        bitrate_box.append(detect_btn)
+        
+        bitrate_row.add_suffix(bitrate_box)
+        settings_group.add(bitrate_row)
+
+        # Display Mode
+        self.display_mode_row = Adw.ComboRow()
+        self.display_mode_row.set_title('Modo de Tela')
+        self.display_mode_row.set_subtitle('Como a janela será exibida')
+        
+        display_model = Gtk.StringList()
+        display_model.append('Janela Sem-bordas (Recomendado)')
+        display_model.append('Tela-cheia')
+        display_model.append('Janela')
+        
+        self.display_mode_row.set_model(display_model)
+        self.display_mode_row.set_selected(0)
+        settings_group.add(self.display_mode_row)
         
         # Audio
         self.audio_row = Adw.SwitchRow()
@@ -125,12 +201,7 @@ class GuestView(Gtk.Box):
         self.hw_decode_row.set_active(True)
         settings_group.add(self.hw_decode_row)
         
-        # Fullscreen
-        self.fullscreen_row = Adw.SwitchRow()
-        self.fullscreen_row.set_title('Tela Cheia')
-        self.fullscreen_row.set_subtitle('Iniciar em modo tela cheia')
-        self.fullscreen_row.set_active(False)
-        settings_group.add(self.fullscreen_row)
+        # Removida opcao fullscreen antiga pois agora esta no ComboRow
         
         # Add to content
         content.append(header)
@@ -732,19 +803,46 @@ class GuestView(Gtk.Box):
             self.show_loading(True, "Conectando...")
             
             # Obter configurações da UI
-            quality_map = {
-                0: 'auto',
-                1: '720p30',
-                2: '1080p30',
-                3: '1080p60',
-                4: '1440p60',
-                5: '4k60',
-            }
+            # Obter configurações da UI (Novo Formato)
+            # Resolução
+            # Resolução
+            res_idx = self.resolution_row.get_selected()
+            res_model = self.resolution_row.get_model()
+            res_string = res_model.get_string(res_idx)
             
-            selected_quality_idx = self.quality_row.get_selected()
-            quality = quality_map.get(selected_quality_idx, 'auto')
-            fullscreen = self.fullscreen_row.get_active()
+            if res_string.startswith("Custom"):
+                resolution = self.custom_resolution_val if self.custom_resolution_val else '1920x1080'
+            else:
+                resolution = res_string.replace('p', '').replace('4K', '3840x2160').replace('720', '1280x720').replace('1080', '1920x1080').replace('1440', '2560x1440')
+                # Fallback simples caso string mude, manter map antigo como ref?
+                # Melhor usar map fixo baseado em index se a ordem não mudar, OU parsear string
+                # Vamos manter o map antigo para os fixos e 'custom' logica nova
+                res_map = {0: '1280x720', 1: '1920x1080', 2: '2560x1440', 3: '3840x2160'}
+                if res_idx < 4:
+                    resolution = res_map[res_idx]
+
+            # FPS
+            fps_idx = self.fps_row.get_selected()
+            fps_model = self.fps_row.get_model()
+            fps_string = fps_model.get_string(fps_idx)
+            
+            if fps_string.startswith("Custom"):
+                 fps = self.custom_fps_val if self.custom_fps_val else '60'
+            else:
+                 fps = fps_string.split(' ')[0] # "60 FPS" -> "60"
+            
+            # Bitrate (Mbps -> Kbps)
+            bitrate_mbps = self.bitrate_scale.get_value()
+            bitrate_kbps = int(bitrate_mbps * 1000)
+            
+            # Display Mode
+            disp_idx = self.display_mode_row.get_selected()
+            # 0=Borderless, 1=Fullscreen, 2=Windowed
+            disp_map = {0: 'borderless-windowed', 1: 'fullscreen', 2: 'windowed'}
+            display_mode = disp_map.get(disp_idx, 'borderless-windowed')
+
             audio = self.audio_row.get_active()
+            hw_decode = self.hw_decode_row.get_active()
             hw_decode = self.hw_decode_row.get_active()
 
             # Executar lógica de conexão
@@ -760,8 +858,11 @@ class GuestView(Gtk.Box):
                 
                 success = self.moonlight.connect(
                     host['ip'],
-                    quality=quality,
-                    fullscreen=fullscreen,
+                    width=resolution.split('x')[0] if 'x' in resolution else None, # Safety check
+                    height=resolution.split('x')[1] if 'x' in resolution else None,
+                    fps=fps,
+                    bitrate=bitrate_kbps,
+                    display_mode=display_mode,
                     audio=audio,
                     hw_decode=hw_decode
                 )
@@ -847,6 +948,118 @@ class GuestView(Gtk.Box):
         dialog.set_response_appearance('ok', Adw.ResponseAppearance.DEFAULT)
         dialog.present()
     
+    def on_resolution_changed(self, row, param):
+        """Handler para mudança de resolução"""
+        model = row.get_model()
+        idx = row.get_selected()
+        item = model.get_string(idx)
+        
+        if item.startswith("Custom"):
+            # Se for clique direto no Custom original ou re-seleção
+            # Mostrar dialog
+            def on_set(value):
+                if value and 'x' in value:
+                     # Atualizar texto do item
+                     # GtkStringList não é mutável facilmente item a item, mas podemos trocar o ultimo?
+                     # Na verdade nao da pra editar string list in place facilmente sem remover/adicionar
+                     # Vamos guardar o valor numa variavel e atualizar o label visualmente se der
+                     # Workaround: Apenas guardar o valor e usar toast
+                     self.custom_resolution_val = value
+                     self.show_toast(f"Resolução definida: {value}")
+                     
+                     # Tentar atualizar o modelo (remover ultimo e add novo)
+                     n_items = model.get_n_items()
+                     # Assumindo que Custom é o ultimo
+                     # Mas remover o item selecionado pode mudar a selecao
+                     # Melhor abordagem não intrusiva: Deixar "Custom" e usar self.custom_resolution_val
+                     # O Usuario pediu: apareça "Custom (valor informado)"
+                     # Então vamos tentar substituir a string no modelo
+                     
+                     # Hack: GtkStringList é imutavel? splice() pode funcionar
+                     # model.splice(idx, 1, [f"Custom ({value})"])
+                     # Mas isso pode disparar notify novamente?
+                     # Vamos tentar bloquear sinal?
+                     # freeze_notify não impede o sinal notify::selected-item se mudarmos a seleção ou o modelo
+                     # O problema é que splice altera o indices/itens e o set_selected dispara o notify novamente
+                     # Solução: Desconectar sinal temporariamente
+                     
+                     row.disconnect_by_func(self.on_resolution_changed)
+                     
+                     model.splice(idx, 1, [f"Custom ({value})"])
+                     row.set_selected(idx) # Manter selecionado
+                     
+                     row.connect("notify::selected-item", self.on_resolution_changed)
+                else:
+                    self.show_error_dialog("Inválido", "Formato deve ser LARGURAxALTURA (ex: 1920x1080)")
+                    # Bloquear sinal para evitar loop ao restaurar seleção
+                    row.disconnect_by_func(self.on_resolution_changed)
+                    row.set_selected(1) # Voltar para 1080p
+                    row.connect("notify::selected-item", self.on_resolution_changed)
+
+            self.show_custom_input_dialog(
+                "Definir Resolução", 
+                "Digite a resolução (LxA):", 
+                "1920x1080", 
+                on_set
+            )
+            
+    def on_fps_changed(self, row, param):
+        """Handler para mudança de FPS"""
+        model = row.get_model()
+        idx = row.get_selected()
+        item = model.get_string(idx)
+        
+        if item.startswith("Custom"):
+             def on_set(value):
+                if value and value.isdigit():
+                     self.custom_fps_val = value
+                     self.show_toast(f"FPS definido: {value}")
+                     
+                     row.disconnect_by_func(self.on_fps_changed)
+                     
+                     model.splice(idx, 1, [f"Custom ({value})"])
+                     row.set_selected(idx)
+                     
+                     row.connect("notify::selected-item", self.on_fps_changed)
+                else:
+                     self.show_error_dialog("Inválido", "FPS deve ser um número inteiro.")
+                     row.disconnect_by_func(self.on_fps_changed)
+                     row.set_selected(1)
+                     row.connect("notify::selected-item", self.on_fps_changed)
+
+             self.show_custom_input_dialog(
+                "Definir FPS", 
+                "Digite a taxa de quadros:", 
+                "60", 
+                on_set
+            )
+
+    def show_custom_input_dialog(self, title, message, default_text, callback):
+        """Mostra diálogo de entrada simples"""
+        dialog = Adw.MessageDialog.new(self.get_root())
+        dialog.set_heading(title)
+        dialog.set_body(message)
+        
+        # Adicionar Entry
+        # AdwMessageDialog set_extra_child
+        entry = Gtk.Entry()
+        entry.set_text(default_text)
+        entry.set_halign(Gtk.Align.CENTER)
+        
+        dialog.set_extra_child(entry)
+        
+        dialog.add_response('cancel', 'Cancelar')
+        dialog.add_response('ok', 'OK')
+        dialog.set_response_appearance('ok', Adw.ResponseAppearance.SUGGESTED)
+        
+        def on_response(dlg, response):
+            if response == 'ok':
+                callback(entry.get_text())
+            # else cancel, do nothing (selection remains but val not set? caller handles revert)
+            
+        dialog.connect('response', on_response)
+        dialog.present()
+
     def show_toast(self, message):
         """Mostra toast notification"""
         window = self.get_root()

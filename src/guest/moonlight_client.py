@@ -48,27 +48,18 @@ class MoonlightClient:
             cmd = [self.moonlight_cmd, 'stream', host_ip, 'Desktop']
             
             # Opções
-            if kwargs.get('quality'):
-                # Mapeamento para resolução e FPS
-                # Formato: --resolution WxH --fps N
-                quality_map = {
-                    '720p30': ['--resolution', '1280x720', '--fps', '30'],
-                    '1080p30': ['--resolution', '1920x1080', '--fps', '30'],
-                    '1080p60': ['--resolution', '1920x1080', '--fps', '60'],
-                    '1440p60': ['--resolution', '2560x1440', '--fps', '60'],
-                    '4k60': ['--resolution', '3840x2160', '--fps', '60'],
-                }
+            if kwargs.get('width') and kwargs.get('height') and kwargs.get('width') != 'custom':
+                cmd.extend(['--resolution', f"{kwargs['width']}x{kwargs['height']}"])
                 
-                if kwargs['quality'] in quality_map:
-                    cmd.extend(quality_map[kwargs['quality']])
-                    
+            if kwargs.get('fps') and kwargs.get('fps') != 'custom':
+                 cmd.extend(['--fps', str(kwargs['fps'])])
+
             if kwargs.get('bitrate'):
                 cmd.extend(['--bitrate', str(kwargs['bitrate'])])
                 
-            if kwargs.get('fullscreen', False):
-                cmd.extend(['--display-mode', 'fullscreen'])
-            else:
-                cmd.extend(['--display-mode', 'windowed'])
+            # Display Mode
+            display_mode = kwargs.get('display_mode', 'borderless-windowed')
+            cmd.extend(['--display-mode', display_mode])
                 
             # Audio (moonlight-qt não tem flag simples de no-audio explicita no help,
             # assumindo padrão ligado. Se quiser desligar, teria que configurar sistema)
