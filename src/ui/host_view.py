@@ -273,6 +273,13 @@ class HostView(Gtk.Box):
         button_box.append(self.start_button)
         button_box.append(self.configure_button)
         
+        self.pin_button = Gtk.Button(label='Inserir PIN')
+        self.pin_button.add_css_class('pill')
+        self.pin_button.set_size_request(180, -1)
+        self.pin_button.set_visible(False)
+        self.pin_button.connect('clicked', self.open_pin_dialog)
+        button_box.append(self.pin_button)
+        
         self.create_summary_box()
         
         content.append(self.header)
@@ -313,24 +320,74 @@ class HostView(Gtk.Box):
             self.audio_hijack_counter = 0
             
         return True
+
+    def open_pin_dialog(self, _):
+        dialog = Adw.MessageDialog(heading="Inserir PIN", body="Digite o PIN exibido no dispositivo cliente (Moonlight).")
+        dialog.set_transient_for(self.get_root())
         
-        button_box.append(self.start_button)
-        button_box.append(self.configure_button)
+        # Grupo de preferências para conter os campos
+        grp = Adw.PreferencesGroup()
         
-        self.create_summary_box()
+        pin_row = Adw.EntryRow(title="PIN")
+        # pin_row.set_input_purpose(Gtk.InputPurpose.NUMBER) # Gtk 4.10+
         
-        content.append(self.header)
-        content.append(self.perf_monitor)
-        content.append(button_box)
-        content.append(self.summary_box)
-        content.append(game_group)
+        name_row = Adw.EntryRow(title="Nome do Dispositivo (Opcional)")
         
-        clamp.set_child(content)
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_vexpand(True)
-        scroll.set_child(clamp)
-        self.append(scroll)
+        grp.add(pin_row)
+        grp.add(name_row)
+        
+        dialog.set_extra_child(grp)
+        
+        dialog.add_response("cancel", "Cancelar")
+        dialog.add_response("ok", "Enviar")
+        dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+        
+        def on_response(d, r):
+            if r == "ok":
+                pin = pin_row.get_text().strip()
+                if not pin: return
+                
+                success, msg = self.sunshine.send_pin(pin)
+                if success:
+                    self.show_toast("PIN enviado com sucesso")
+                elif "Falha de Autenticação" in msg:
+                    # Se falhar autenticação, pedir credenciais
+                    self.open_sunshine_auth_dialog(pin)
+                else:
+                    self.show_error_dialog("Erro no PIN", msg)
+                
+        dialog.connect("response", on_response)
+        dialog.present()
+        
+    def open_sunshine_auth_dialog(self, pin_to_retry: str):
+        dialog = Adw.MessageDialog(heading="Autenticação Sunshine", body="O Sunshine requer login. Digite suas credenciais (padrão: admin / senha criada na instalação).")
+        dialog.set_transient_for(self.get_root())
+        
+        grp = Adw.PreferencesGroup()
+        user_row = Adw.EntryRow(title="Usuário")
+        user_row.set_text("admin")
+        pass_row = Adw.PasswordEntryRow(title="Senha")
+        
+        grp.add(user_row); grp.add(pass_row)
+        dialog.set_extra_child(grp)
+        
+        dialog.add_response("cancel", "Cancelar")
+        dialog.add_response("login", "Confirmar")
+        dialog.set_response_appearance("login", Adw.ResponseAppearance.SUGGESTED)
+        
+        def on_auth_resp(d, r):
+            if r == "login":
+                user = user_row.get_text().strip()
+                pwd = pass_row.get_text().strip()
+                if not user or not pwd: return
+                
+                # Tentar novamente com credenciais
+                success, msg = self.sunshine.send_pin(pin_to_retry, auth=(user, pwd))
+                if success: self.show_toast("PIN enviado com sucesso")
+                else: self.show_error_dialog("Falha com credenciais", msg)
+                
+        dialog.connect("response", on_auth_resp)
+        dialog.present()
 
     def create_summary_box(self):
         self.summary_box = Adw.PreferencesGroup(); self.summary_box.set_title("Informações do Servidor")
@@ -409,6 +466,7 @@ class HostView(Gtk.Box):
             self.configure_button.set_sensitive(True)
             self.configure_button.add_css_class('suggested-action')
             for r in [self.game_mode_row, self.hardware_expander, self.streaming_expander, self.advanced_expander]: r.set_sensitive(False)
+            if hasattr(self, 'pin_button'): self.pin_button.set_visible(True)
             if hasattr(self, 'summary_box'):
                  self.summary_box.set_visible(True)
                  self.populate_summary_fields()
@@ -418,6 +476,7 @@ class HostView(Gtk.Box):
             self.perf_monitor.stop_monitoring()
             self.header.set_visible(True)
             if hasattr(self, 'summary_box'): self.summary_box.set_visible(False)
+            if hasattr(self, 'pin_button'): self.pin_button.set_visible(False)
             self.start_button.set_label('Iniciar Servidor')
             self.start_button.remove_css_class('destructive-action')
             self.start_button.add_css_class('suggested-action')
@@ -503,17 +562,26 @@ class HostView(Gtk.Box):
                 sunshine_config['audio'] = 'none'
                 self.audio_manager.cleanup()
 
-            monitor_idx = self.monitor_row.get_selected()
-            if monitor_idx > 0: sunshine_config['output_name'] = int(monitor_idx - 1)
-            if selected_gpu_info['encoder'] == 'vaapi' and selected_gpu_info['adapter'] != 'auto':
-                sunshine_config['adapter_name'] = selected_gpu_info['adapter']
-    
             platforms = ['auto', 'wayland', 'x11', 'kms']
             platform = platforms[self.platform_row.get_selected()]
             if platform == 'auto':
                 session = os.environ.get('XDG_SESSION_TYPE', '').lower()
                 platform = 'wayland' if session == 'wayland' else 'x11'
             sunshine_config['platform'] = platform
+
+            if platform != 'wayland':
+                monitor_idx = self.monitor_row.get_selected()
+                # Se selecionado um monitor especifico (não Auto), tenta usar o nome
+                if 0 < monitor_idx < len(self.available_monitors):
+                    mon_name = self.available_monitors[monitor_idx][1]
+                    if mon_name != 'auto':
+                        sunshine_config['output_name'] = mon_name
+            
+            # Se for Wayland, NÃO definimos output_name. 
+            # O Sunshine usa Portals (Pipewire) que pede pro usuário escolher ou usa o padrão.
+            # Definir output_name no Wayland frequentemente causa erros de "Monitor not found".
+            if selected_gpu_info['encoder'] == 'vaapi' and selected_gpu_info['adapter'] != 'auto':
+                sunshine_config['adapter_name'] = selected_gpu_info['adapter']
             
             if platform == 'wayland':
                 sunshine_config['wayland.display'] = os.environ.get('WAYLAND_DISPLAY', 'wayland-0')

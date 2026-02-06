@@ -224,3 +224,38 @@ class SunshineHost:
         except Exception as e:
             print(f"Erro ao configurar Sunshine: {e}")
             return False
+
+    def send_pin(self, pin: str, auth: tuple[str, str] = None) -> tuple[bool, str]:
+        """Envia PIN para o Sunshine via API"""
+        import urllib.request, ssl, json, base64
+        
+        url = "https://localhost:47990/api/pin"
+        headers = {
+            "Content-Type": "application/json",
+        }
+        
+        if auth:
+            username, password = auth
+            auth_str = f"{username}:{password}"
+            b64_auth = base64.b64encode(auth_str.encode()).decode()
+            headers["Authorization"] = f"Basic {b64_auth}"
+        
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        try:
+            data = json.dumps({"pin": pin}).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+            
+            with urllib.request.urlopen(req, context=ctx, timeout=5) as response:
+                if response.status == 200:
+                    return True, "PIN enviado com sucesso"
+                return False, f"Status HTTP {response.status}"
+                
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                return False, "Falha de Autenticação. Configure um usuário no Sunshine."
+            return False, f"Erro API: {e.code} - {e.reason}"
+        except Exception as e:
+            return False, f"Erro de Conexão: {e}"
