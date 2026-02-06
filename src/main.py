@@ -53,7 +53,7 @@ class BigRemotePlayApp(Adw.Application):
             application_icon='big-remote-play-together',
             developer_name='Rafael Ruscher',
             version='1.0.0',
-            developers=['Rafael Ruscher <rruscher@gmail.com>', 'Alexasandro Pacheco Feliciano @pachecogameroficial', 'Alessandro e Silva Xavier @alessandro741'],
+            developers=['Rafael Ruscher <rruscher@gmail.com>', 'Alexasandro Pacheco Feliciano <@pachecogameroficial>', 'Alessandro e Silva Xavier <@alessandro741>'],
             copyright='© 2026 BigLinux',
             license_type=Gtk.License.GPL_3_0,
             website='https://www.biglinux.com.br',

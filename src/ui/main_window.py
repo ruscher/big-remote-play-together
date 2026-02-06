@@ -119,48 +119,71 @@ class MainWindow(Adw.ApplicationWindow):
         separator.set_margin_bottom(8)
         footer.append(separator)
         
-        # Label "Status dos Servidores"
-        status_title = Gtk.Label(label='Status dos Servidores')
+        # Label "Status dos Serviços"
+        status_title = Gtk.Label(label='Status dos Serviços')
         status_title.add_css_class('caption')
         status_title.add_css_class('dim-label')
         status_title.set_halign(Gtk.Align.START)
         status_title.set_margin_bottom(4)
         footer.append(status_title)
         
-        # Status Sunshine
-        sunshine_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        sunshine_box.set_margin_start(4)
+        # Card container
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        card.add_css_class("info-card")
+        
+        # Sunshine Row
+        row_sun = Gtk.Box(spacing=10)
+        row_sun.add_css_class("info-row")
+        
+        box_key_sun = Gtk.Box(spacing=8)
+        box_key_sun.set_hexpand(True)
         
         self.sunshine_dot = Gtk.Image.new_from_icon_name('media-record-symbolic')
-        self.sunshine_dot.set_pixel_size(12)
+        self.sunshine_dot.set_pixel_size(10)
         self.sunshine_dot.add_css_class('status-dot')
-        self.sunshine_dot.add_css_class('status-offline')  # Inicialmente offline
-        sunshine_box.append(self.sunshine_dot)
+        self.sunshine_dot.add_css_class('status-offline')
+        box_key_sun.append(self.sunshine_dot)
         
-        sunshine_label = Gtk.Label(label='Sunshine')
-        sunshine_label.add_css_class('caption')
-        sunshine_label.set_halign(Gtk.Align.START)
-        sunshine_box.append(sunshine_label)
+        lbl_key_sun = Gtk.Label(label='SUNSHINE')
+        lbl_key_sun.add_css_class('info-key')
+        box_key_sun.append(lbl_key_sun)
         
-        footer.append(sunshine_box)
+        row_sun.append(box_key_sun)
         
-        # Status Moonlight
-        moonlight_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        moonlight_box.set_margin_start(4)
+        self.lbl_sunshine_status = Gtk.Label(label='Verificando...')
+        self.lbl_sunshine_status.add_css_class('info-value')
+        self.lbl_sunshine_status.set_halign(Gtk.Align.END)
+        row_sun.append(self.lbl_sunshine_status)
+        
+        card.append(row_sun)
+        
+        # Moonlight Row
+        row_moon = Gtk.Box(spacing=10)
+        row_moon.add_css_class("info-row")
+        
+        box_key_moon = Gtk.Box(spacing=8)
+        box_key_moon.set_hexpand(True)
         
         self.moonlight_dot = Gtk.Image.new_from_icon_name('media-record-symbolic')
-        self.moonlight_dot.set_pixel_size(12)
+        self.moonlight_dot.set_pixel_size(10)
         self.moonlight_dot.add_css_class('status-dot')
-        self.moonlight_dot.add_css_class('status-offline')  # Inicialmente offline
-        moonlight_box.append(self.moonlight_dot)
+        self.moonlight_dot.add_css_class('status-offline')
+        box_key_moon.append(self.moonlight_dot)
         
-        moonlight_label = Gtk.Label(label='Moonlight')
-        moonlight_label.add_css_class('caption')
-        moonlight_label.set_halign(Gtk.Align.START)
-        moonlight_box.append(moonlight_label)
+        lbl_key_moon = Gtk.Label(label='MOONLIGHT')
+        lbl_key_moon.add_css_class('info-key')
+        box_key_moon.append(lbl_key_moon)
         
-        footer.append(moonlight_box)
+        row_moon.append(box_key_moon)
         
+        self.lbl_moonlight_status = Gtk.Label(label='Verificando...')
+        self.lbl_moonlight_status.add_css_class('info-value')
+        self.lbl_moonlight_status.set_halign(Gtk.Align.END)
+        row_moon.append(self.lbl_moonlight_status)
+        
+        card.append(row_moon)
+        
+        footer.append(card)
         return footer
         
     def update_server_status(self, has_sun, has_moon):
@@ -170,7 +193,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def update_dependency_ui(self, has_sun, has_moon):
         for lbl, card, has, name in [(self.lbl_sunshine_status, self.host_card, has_sun, 'Sunshine'), (self.lbl_moonlight_status, self.guest_card, has_moon, 'Moonlight')]:
-            lbl.set_markup(f'{name} - <span color="{"#2ec27e" if has else "#e01b24"}">{"Instalado" if has else "Falta Instalar"}</span>')
+            lbl.set_markup(f'<span color="{"#2ec27e" if has else "#e01b24"}">{"Instalado" if has else "Falta Instalar"}</span>')
             card.set_sensitive(has); card.set_tooltip_text('' if has else f'Necessário instalar {name} para {"hospedar" if name=="Sunshine" else "conectar"}')
 
         
@@ -189,10 +212,7 @@ class MainWindow(Adw.ApplicationWindow):
         scroll = Gtk.ScrolledWindow(); scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC); scroll.set_vexpand(True)
         sp = Adw.StatusPage(icon_name='big-remote-play-together', title='Big Remote Play Together', description='Jogue cooperativamente através da rede local\nCompartilhe seus jogos ou conecte-se a um servidor')
         cb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=32); cb.set_halign(Gtk.Align.CENTER); cb.set_margin_bottom(24)
-        db = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8); db.set_halign(Gtk.Align.CENTER); db.append(Gtk.Label(label='Dependências', css_classes=['heading', 'dim-label']))
-        self.lbl_sunshine_status = Gtk.Label(label='Sunshine - Verificando...'); self.lbl_moonlight_status = Gtk.Label(label='Moonlight - Verificando...')
-        for l in [self.lbl_sunshine_status, self.lbl_moonlight_status]: db.append(l)
-        cb.append(db); cards = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24); cards.set_halign(Gtk.Align.CENTER)
+        cards = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24); cards.set_halign(Gtk.Align.CENTER)
         self.host_card = self.create_action_card('Hospedar Servidor', 'Compartilhe seus jogos com outros jogadores na rede', 'network-server-symbolic', 'suggested-action', lambda: self.navigate_to('host'))
         self.guest_card = self.create_action_card('Conectar Servidor', 'Conecte-se a um servidor de jogos na rede', 'network-workgroup-symbolic', '', lambda: self.navigate_to('guest'))
         for c in [self.host_card, self.guest_card]: cards.append(c)

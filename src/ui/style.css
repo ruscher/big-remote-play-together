@@ -125,3 +125,18 @@ entry:focus {
 .status-dot.status-offline {
     color: #c01c28;
 }
+
+/* System Info Card - Refined glassmorphism with subtle shine */
+.info-card {
+    background: alpha(@card_bg_color, 0.55);
+    border-radius: 16px;
+    padding: 14px 28px;
+    border: 1px solid alpha(@borders, 0.06);
+    border-top: 1px solid alpha(white, 0.1);
+    box-shadow: 0 4px 20px alpha(black, 0.03),
+                0 1px 3px alpha(black, 0.02);
+}
+
+.info-row { padding: 5px 0; }
+.info-key { font-size: 10px; font-weight: 700; opacity: 0.4; letter-spacing: 1px; text-transform: uppercase; }
+.info-value { font-size: 13px; font-weight: 500; }

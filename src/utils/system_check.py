@@ -54,17 +54,36 @@ class SystemCheck:
             return False
     
     def is_moonlight_running(self) -> bool:
-        """Verifica se o processo Moonlight está rodando"""
+        """Verifica se o processo Moonlight está rodando (ignora zumbis)"""
         try:
-            # Verificar diferentes nomes de processo
             for process_name in ['moonlight', 'moonlight-qt']:
+                # Pega os PIDs
                 result = subprocess.run(
                     ['pgrep', '-x', process_name],
                     capture_output=True,
+                    text=True, # Importante para ler a saída como texto
                     timeout=2
                 )
-                if result.returncode == 0:
-                    return True
+                
+                if result.returncode == 0 and result.stdout:
+                    pids = result.stdout.strip().split()
+                    for pid in pids:
+                        # Verifica o estado do processo
+                        try:
+                            state_check = subprocess.run(
+                                ['ps', '-o', 'state=', '-p', pid],
+                                capture_output=True,
+                                text=True,
+                                timeout=1
+                            )
+                            if state_check.returncode == 0:
+                                state = state_check.stdout.strip()
+                                # Se estado não for Z (Zombie) ou T (Stopped), considera rodando
+                                if state and state not in ['Z', 'T', 'Z+']:
+                                    return True
+                        except:
+                            continue
+                            
             return False
         except:
             return False
