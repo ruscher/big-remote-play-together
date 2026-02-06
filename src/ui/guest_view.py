@@ -1,19 +1,16 @@
-"""
-View para modo Guest (conectar a hosts)
-"""
+
 
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw, GLib, Gdk
-import subprocess
-import threading
+import subprocess, threading, os
+from pathlib import Path
 from utils.config import Config
+from guest.moonlight_client import MoonlightClient
 
 class GuestView(Gtk.Box):
-    """Interface para conectar a hosts"""
-    
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         
@@ -21,89 +18,45 @@ class GuestView(Gtk.Box):
         self.is_connected = False
         self.pin_dialog = None
         
-        # Initialize client
-        from guest.moonlight_client import MoonlightClient
         self.moonlight = MoonlightClient()
         self.config = Config()
-        
         self.setup_ui()
         self.discover_hosts()
-        
-        # Start monitoring
         GLib.timeout_add(1000, self.monitor_connection)
         
     def detect_bitrate(self, button=None):
-        """Simula detecção de bitrate"""
-        # Futuramente pode usar iperf3 ou similar
         self.show_toast("Detectando largura de banda...")
-        
         def run_detect():
-            import time
-            import random
-            # Fake detection logic
+            import time, random
             time.sleep(1.5)
-            
-            # Simular valor entre 10 e 100
             val = random.randint(15, 80)
-            
             GLib.idle_add(lambda: self.bitrate_scale.set_value(val))
             GLib.idle_add(lambda: self.show_toast(f"Bitrate sugerido: {val} Mbps"))
-            
         threading.Thread(target=run_detect, daemon=True).start()
         
     def setup_ui(self):
-        """Configura interface"""
-        # Clamp para centralizar
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(800)
-        clamp.set_margin_top(24)
-        clamp.set_margin_bottom(24)
-        clamp.set_margin_start(24)
-        clamp.set_margin_end(24)
-        
+        clamp = Adw.Clamp(); clamp.set_maximum_size(800)
+        for m in ['top', 'bottom', 'start', 'end']: getattr(clamp, f'set_margin_{m}')(24)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
-        
-        # Loading Bar
-        self.loading_bar = Gtk.ProgressBar()
-        self.loading_bar.add_css_class('osd')
-        self.loading_bar.set_visible(False)
+        self.loading_bar = Gtk.ProgressBar(); self.loading_bar.add_css_class('osd'); self.loading_bar.set_visible(False)
         content.append(self.loading_bar)
-        
-        # Performance monitor
         from .performance_monitor import PerformanceMonitor
-        self.perf_monitor = PerformanceMonitor()
-        self.perf_monitor.set_visible(False)  # Oculto até conectar
-        content.append(self.perf_monitor)
+        self.perf_monitor = PerformanceMonitor(); self.perf_monitor.set_visible(False)
         
-        # Header
         self.header = Adw.PreferencesGroup()
         self.header.set_title('Conectar Servidor')
         self.header.set_description('Encontre e conecte o host nas opções abaixo.')
         
-        # Connection status integrated into Perf Monitor
-        # header.add(self.status_card) removed
+        content.append(self.header)
+        content.append(self.perf_monitor)
         
-        # Performance monitor removed from here (moved to top)
-        
-        # Performance monitor removed from here (moved to top)
-        
-        # Stack for connection methods
         self.method_stack = Gtk.Stack()
         self.method_stack.set_transition_type(Gtk.StackTransitionType.NONE)
         
-        # Method 1: Discover
-        discover_page = self.create_discover_page()
-        self.method_stack.add_titled(discover_page, 'discover', 'Descobrir')
+        self.method_stack.add_titled(self.create_discover_page(), 'discover', 'Descobrir')
+        self.method_stack.add_titled(self.create_manual_page(), 'manual', 'Manual')
+        self.method_stack.add_titled(self.create_pin_page(), 'pin', 'Código PIN')
         
-        # Method 2: Manual
-        manual_page = self.create_manual_page()
-        self.method_stack.add_titled(manual_page, 'manual', 'Manual')
-        
-        # Method 3: PIN
-        pin_page = self.create_pin_page()
-        self.method_stack.add_titled(pin_page, 'pin', 'Código PIN')
-        
-        # Stack switcher
         switcher = Gtk.StackSwitcher()
         switcher.set_stack(self.method_stack)
         switcher.set_halign(Gtk.Align.CENTER)
@@ -112,56 +65,24 @@ class GuestView(Gtk.Box):
         self.switcher_box.append(switcher)
         self.switcher_box.append(self.method_stack)
         
-        # Client settings
-        settings_group = Adw.PreferencesGroup()
-        settings_group.set_title('Configurações do Cliente')
-        settings_group.set_margin_top(12)
-        
-        # Reset Button
-        reset_btn = Gtk.Button(icon_name="edit-undo-symbolic")
-        reset_btn.add_css_class("flat")
-        reset_btn.set_tooltip_text("Restaurar Padrão")
-        reset_btn.connect("clicked", self.on_reset_clicked)
-        settings_group.set_header_suffix(reset_btn)
-        
-        # Resolution preference
-        self.resolution_row = Adw.ComboRow()
-        self.resolution_row.set_title('Resolução')
-        self.resolution_row.set_subtitle('Resolução do stream')
-        
+        settings_group = Adw.PreferencesGroup(); settings_group.set_title('Configurações do Cliente'); settings_group.set_margin_top(12)
+        reset_btn = Gtk.Button(icon_name="edit-undo-symbolic"); reset_btn.add_css_class("flat"); reset_btn.set_tooltip_text("Restaurar Padrão")
+        reset_btn.connect("clicked", self.on_reset_clicked); settings_group.set_header_suffix(reset_btn)
+        self.resolution_row = Adw.ComboRow(); self.resolution_row.set_title('Resolução'); self.resolution_row.set_subtitle('Resolução do stream')
         res_model = Gtk.StringList()
-        res_model.append('720p')
-        res_model.append('1080p')
-        res_model.append('1440p')
-        res_model.append('4K')
-        res_model.append('Custom') # Placeholder implementation
+        for r in ['720p', '1080p', '1440p', '4K', 'Custom']: res_model.append(r)
+        self.resolution_row.set_model(res_model); self.resolution_row.set_selected(1); settings_group.add(self.resolution_row)
         
-        self.resolution_row.set_model(res_model)
-        self.resolution_row.set_selected(1) # Default 1080p
-        self.resolution_row.set_selected(1) # Default 1080p
-        settings_group.add(self.resolution_row)
-        
-        # Scale (Native/Auto)
         self.scale_row = Adw.SwitchRow()
-        self.scale_row.set_title('Resolução Nativa (Adaptável)')
-        self.scale_row.set_subtitle('Usar resolução da tela/janela')
-        self.scale_row.set_active(False)
-        self.scale_row.connect("notify::active", self.on_scale_changed)
+        self.scale_row.set_title('Resolução Nativa (Adaptável)'); self.scale_row.set_subtitle('Usar resolução da tela/janela')
+        self.scale_row.set_active(False); self.scale_row.connect("notify::active", self.on_scale_changed)
         settings_group.add(self.scale_row)
         
-        # FPS preference
         self.fps_row = Adw.ComboRow()
-        self.fps_row.set_title('Taxa de Quadros (FPS)')
-        self.fps_row.set_subtitle('Fluidez do vídeo')
-        
+        self.fps_row.set_title('Taxa de Quadros (FPS)'); self.fps_row.set_subtitle('Fluidez do vídeo')
         fps_model = Gtk.StringList()
-        fps_model.append('30 FPS')
-        fps_model.append('60 FPS')
-        fps_model.append('120 FPS')
-        fps_model.append('Custom')
-        
-        self.fps_row.set_model(fps_model)
-        self.fps_row.set_selected(1) # Default 60 FPS
+        for f in ['30 FPS', '60 FPS', '120 FPS', 'Custom']: fps_model.append(f)
+        self.fps_row.set_model(fps_model); self.fps_row.set_selected(1)
         settings_group.add(self.fps_row)
         
         # Connect signals for Custom handling
@@ -171,92 +92,32 @@ class GuestView(Gtk.Box):
         self.resolution_row.connect("notify::selected-item", self.on_resolution_changed)
         self.fps_row.connect("notify::selected-item", self.on_fps_changed)
         
-        # Connection management buttons for settings
         self.apply_settings_btn = Gtk.Button(label='Aplicar e Reconectar')
-        self.apply_settings_btn.add_css_class('suggested-action')
-        self.apply_settings_btn.add_css_class('pill')
-        self.apply_settings_btn.set_size_request(-1, 50)
-        self.apply_settings_btn.set_margin_top(24)
-        self.apply_settings_btn.set_visible(False) # Only visible when connected
-        self.apply_settings_btn.connect('clicked', lambda b: self.check_reconnect())
-        
+        self.apply_settings_btn.add_css_class('suggested-action'); self.apply_settings_btn.add_css_class('pill')
+        self.apply_settings_btn.set_size_request(-1, 50); self.apply_settings_btn.set_margin_top(24)
+        self.apply_settings_btn.set_visible(False); self.apply_settings_btn.connect('clicked', lambda b: self.check_reconnect())
         settings_group.add(self.apply_settings_btn)
         
-        # Bitrate
-        bitrate_row = Adw.ActionRow()
-        bitrate_row.set_title("Bitrate (Qualidade)")
-        bitrate_row.set_subtitle("Ajuste a largura de banda (0.5 - 150 Mbps)")
-        
+        bitrate_row = Adw.ActionRow(); bitrate_row.set_title("Bitrate (Qualidade)"); bitrate_row.set_subtitle("Ajuste a largura de banda (0.5 - 150 Mbps)")
         bitrate_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        
         self.bitrate_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.5, 150.0, 0.5)
-        self.bitrate_scale.set_hexpand(True)
-        self.bitrate_scale.set_value(20.0) # Default 20 Mbps
-        self.bitrate_scale.set_value(20.0) # Default 20 Mbps
-        self.bitrate_scale.set_draw_value(True)
-        # Reconnect logic removed (now manual)
-        
-        detect_btn = Gtk.Button(label="Detectar")
-        detect_btn.add_css_class("flat")
-        detect_btn.set_tooltip_text("Detectar melhor bitrate para a rede")
-        detect_btn.connect("clicked", self.detect_bitrate)
-        
-        bitrate_box.append(self.bitrate_scale)
-        bitrate_box.append(detect_btn)
-        
-        bitrate_row.add_suffix(bitrate_box)
-        settings_group.add(bitrate_row)
+        self.bitrate_scale.set_hexpand(True); self.bitrate_scale.set_value(20.0); self.bitrate_scale.set_draw_value(True)
+        detect_btn = Gtk.Button(label="Detectar"); detect_btn.add_css_class("flat"); detect_btn.connect("clicked", self.detect_bitrate)
+        bitrate_box.append(self.bitrate_scale); bitrate_box.append(detect_btn)
+        bitrate_row.add_suffix(bitrate_box); settings_group.add(bitrate_row)
 
-        # Display Mode
-        self.display_mode_row = Adw.ComboRow()
-        self.display_mode_row.set_title('Modo de Tela')
-        self.display_mode_row.set_subtitle('Como a janela será exibida')
+        self.display_mode_row = Adw.ComboRow(); self.display_mode_row.set_title('Modo de Tela'); self.display_mode_row.set_subtitle('Como a janela será exibida')
+        disp_model = Gtk.StringList()
+        for d in ['Janela Sem-bordas', 'Tela-cheia', 'Janela']: disp_model.append(d)
+        self.display_mode_row.set_model(disp_model); self.display_mode_row.set_selected(0); settings_group.add(self.display_mode_row)
         
-        display_model = Gtk.StringList()
-        display_model.append('Janela Sem-bordas (Recomendado)')
-        display_model.append('Tela-cheia')
-        display_model.append('Janela')
-        
-        self.display_mode_row.set_model(display_model)
-        self.display_mode_row.set_selected(0)
-        # Removed auto reconnect
-        settings_group.add(self.display_mode_row)
-        
-        # Audio
-        self.audio_row = Adw.SwitchRow()
-        self.audio_row.set_title('Áudio')
-        self.audio_row.set_subtitle('Receber streaming de áudio')
-        self.audio_row.set_active(True)
-        # Removed auto reconnect
-        settings_group.add(self.audio_row)
-        
-        # Hardware decode
-        self.hw_decode_row = Adw.SwitchRow()
-        self.hw_decode_row.set_title('Decodificação por Hardware')
-        self.hw_decode_row.set_subtitle('Usar GPU para decodificar (recomendado)')
-        self.hw_decode_row.set_active(True)
-        # Removed auto reconnect
-        settings_group.add(self.hw_decode_row)
-        
-        # Removida opcao fullscreen antiga pois agora esta no ComboRow
-        
-        # Add to content
-        # Add to content
-        content.append(self.header)
-        content.append(self.switcher_box)
-        content.append(settings_group)
-        
-        self.load_guest_settings()
-        self.connect_settings_signals()
-        
-        clamp.set_child(content)
-        
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_vexpand(True)
-        scroll.set_child(clamp)
-        
-        self.append(scroll)
+        self.audio_row = Adw.SwitchRow(); self.audio_row.set_title('Áudio'); self.audio_row.set_subtitle('Receber streaming de áudio')
+        self.audio_row.set_active(True); settings_group.add(self.audio_row)
+        self.hw_decode_row = Adw.SwitchRow(); self.hw_decode_row.set_title('Decodificação Hardware'); self.hw_decode_row.set_subtitle('Usar GPU para decodificar')
+        self.hw_decode_row.set_active(True); settings_group.add(self.hw_decode_row)
+        content.append(self.switcher_box); content.append(settings_group)
+        self.load_guest_settings(); self.connect_settings_signals(); clamp.set_child(content)
+        scroll = Gtk.ScrolledWindow(); scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC); scroll.set_vexpand(True); scroll.set_child(clamp); self.append(scroll)
         
     # create_status_card removed
 
@@ -270,8 +131,8 @@ class GuestView(Gtk.Box):
                 if not self.is_connected:
                      # Atualizar state se estava desmarcado
                      self.is_connected = True
-                     
                      host_name = self.moonlight.connected_host if self.moonlight.connected_host else "Host"
+                     self.header.set_description(f"Host conectado: {host_name}")
                      self.perf_monitor.set_connection_status(host_name, "Sessão Ativa", True)
                      
                      self.perf_monitor.set_visible(True)
@@ -282,7 +143,7 @@ class GuestView(Gtk.Box):
                 if self.is_connected:
                     # Detectou que fechou
                     self.is_connected = False
-                    
+                    self.header.set_description('Encontre e conecte o host nas opções abaixo.')
                     self.perf_monitor.set_connection_status("None", "Desconectado", False)
                     self.perf_monitor.stop_monitoring()
                     self.perf_monitor.set_visible(False)
@@ -295,58 +156,20 @@ class GuestView(Gtk.Box):
         return True # Continue polling
 
     def update_ui_state(self):
-        """Atualiza visibilidade dos widgets baseado na conexão"""
-        connected = self.is_connected
-        
-        # Ocultar métodos de conexão se conectado
-        if hasattr(self, 'switcher_box'):
-            # Usar set_visible ou set_sensitive
-            self.switcher_box.set_visible(not connected)
-            
-        if hasattr(self, 'apply_settings_btn'):
-            self.apply_settings_btn.set_visible(connected)
-            
+        c = self.is_connected
+        if hasattr(self, 'switcher_box'): self.switcher_box.set_visible(not c)
+        if hasattr(self, 'apply_settings_btn'): self.apply_settings_btn.set_visible(c)
         if hasattr(self, 'header'):
             self.header.set_visible(True)
-            if connected:
-                self.header.set_description('Host encontrado e conectado.')
-            else:
-                self.header.set_description('Encontre e conecte o host nas opções abaixo.')
-            
-        # Ocultar também as páginas de conexão para limpar a tela
-        # Mas manter o settings_group visível (sempre visivel)
-            
-        # Ocultar também as páginas de conexão para limpar a tela
-        # Mas manter o settings_group visível (sempre visivel)
+            self.header.set_description('Host conectado.' if c else 'Encontre e conecte o host nas opções abaixo.')
         
     def check_reconnect(self):
-        """Verifica se deve reconectar após mudança de config"""
         if self.is_connected and hasattr(self, 'current_host_ctx'):
-            print("Configuração alterada. Reconectando...")
             self.show_toast("Aplicando configurações...")
-            
-            # Debounce ou restart imediato?
-            # Vamos reiniciar a thread de conexão
-            
-            # Necessário parar o atual primeiro?
-            # O moonlight_client deve matar o processo anterior se chamarmos connect de novo?
-            # Vamos assumir que sim ou forçar kill
-            
-            # Reinvocar a conexão com os parâmetros salvos
             ctx = self.current_host_ctx
-            
-            # Forçar desconexão para aplicar novas configs
-            if self.is_connected:
-                print("Disconnecting for reconfiguration...")
-                self.moonlight.disconnect()
-                # Aguardar brevemente para garantir que o processo morreu? 
-                # O disconnect tem wait(timeout=5)
-                # Mas do_connect/connect_to_host rodará em thread.
-                
-            if ctx['type'] == 'auto':
-                self.connect_to_host(ctx['host'])
-            elif ctx['type'] == 'manual':
-                self.connect_manual(ctx['ip'], str(ctx['port']), ctx['ipv6'])
+            if self.is_connected: self.moonlight.disconnect()
+            if ctx['type'] == 'auto': self.connect_to_host(ctx['host'])
+            elif ctx['type'] == 'manual': self.connect_manual(ctx['ip'], str(ctx['port']), ctx['ipv6'])
                 
     def check_reconnect_debounced(self):
         """Verifica se deve reconectar (com debounce para sliders)"""
@@ -362,149 +185,47 @@ class GuestView(Gtk.Box):
         return False
         
     def create_discover_page(self):
-        """Cria página de descoberta automática"""
-        self.selected_host_card_data = None
-        self.first_radio_in_list = None
-        
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0) # Spacing 0 for tight layout
-        
-        # Header / Refresh
-        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        header_box.set_margin_top(12)
-        header_box.set_margin_bottom(12)
-        header_box.set_margin_start(12)
-        header_box.set_margin_end(12)
-        
-        lbl = Gtk.Label(label="Hosts Descobertos")
-        lbl.add_css_class("heading")
-        lbl.set_halign(Gtk.Align.START)
-        lbl.set_hexpand(True)
-        
-        refresh_btn = Gtk.Button(icon_name='view-refresh-symbolic')
-        refresh_btn.set_tooltip_text("Atualizar Lista")
-        refresh_btn.connect('clicked', lambda b: self.discover_hosts())
-        
-        header_box.append(lbl)
-        header_box.append(refresh_btn)
-        
-        # Hosts list
-        self.hosts_list = Gtk.ListBox()
-        self.hosts_list.add_css_class('boxed-list')
-        self.hosts_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        self.hosts_list.set_margin_start(12)
-        self.hosts_list.set_margin_end(12)
-        
-        # scroll = Gtk.ScrolledWindow()
-        # scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        # scroll.set_vexpand(True)
-        # scroll.set_child(self.hosts_list)
-        
-        # Main Connect Button (External)
-        action_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        action_box.set_margin_top(12)
-        action_box.set_margin_bottom(12)
-        action_box.set_margin_start(12)
-        action_box.set_margin_end(12)
-        
-        self.main_connect_btn = Gtk.Button(label='Conectar ao Host Selecionado')
-        self.main_connect_btn.add_css_class('suggested-action')
-        self.main_connect_btn.add_css_class('pill')
-        self.main_connect_btn.set_size_request(-1, 50)
-        self.main_connect_btn.set_sensitive(False) # Starts disabled
-        
-        def on_main_connect(b):
-            if self.selected_host_card_data:
-                h = self.selected_host_card_data
-                self.connect_manual(h['ip'], str(h.get('port', 47989)))
-        
-        self.main_connect_btn.connect('clicked', on_main_connect)
-        action_box.append(self.main_connect_btn)
-        
-        box.append(header_box)
-        # box.append(scroll)
-        box.append(self.hosts_list)
-        box.append(action_box)
-        
+        self.selected_host_card_data = self.first_radio_in_list = None
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        for m in ['top', 'bottom', 'start', 'end']: getattr(header, f'set_margin_{m}')(12)
+        lbl = Gtk.Label(label="Hosts Descobertos"); lbl.add_css_class("heading"); lbl.set_halign(Gtk.Align.START); lbl.set_hexpand(True)
+        refresh = Gtk.Button(icon_name='view-refresh-symbolic'); refresh.connect('clicked', lambda b: self.discover_hosts())
+        header.append(lbl); header.append(refresh)
+        self.hosts_list = Gtk.ListBox(); self.hosts_list.add_css_class('boxed-list'); self.hosts_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        for m in ['start', 'end']: getattr(self.hosts_list, f'set_margin_{m}')(12)
+        action = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        for m in ['top', 'bottom', 'start', 'end']: getattr(action, f'set_margin_{m}')(12)
+        self.main_connect_btn = Gtk.Button(label='Conectar ao Selecionado'); self.main_connect_btn.add_css_class('suggested-action')
+        self.main_connect_btn.add_css_class('pill'); self.main_connect_btn.set_size_request(-1, 50); self.main_connect_btn.set_sensitive(False)
+        self.main_connect_btn.connect('clicked', lambda b: self.connect_manual(self.selected_host_card_data['ip'], str(self.selected_host_card_data.get('port', 47989))) if self.selected_host_card_data else None)
+        action.append(self.main_connect_btn); box.append(header); box.append(self.hosts_list); box.append(action)
         return box
 
     def discover_hosts(self):
-        """Descobre hosts na rede e popula a lista"""
         from utils.network import NetworkDiscovery
-        import gi
-        from gi.repository import Gtk, GLib
-        
-        # Reset state
-        self.first_radio_in_list = None
-        self.selected_host_card_data = None
-        self.main_connect_btn.set_sensitive(False)
-        self.main_connect_btn.set_label('Conectar')
-        
-        # Limpar lista
-        while True:
-            row = self.hosts_list.get_row_at_index(0)
-            if row is None:
-                break
-            self.hosts_list.remove(row)
-        
-        # Placeholder de carregando
-        self.loading_row = Gtk.ListBoxRow()
-        self.loading_row.set_selectable(False)
-        self.loading_row.set_activatable(False)
-        
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        box.set_halign(Gtk.Align.CENTER)
-        
-        spinner = Gtk.Spinner()
-        spinner.start()
-        label = Gtk.Label(label='Procurando hosts...')
-        
-        box.append(spinner)
-        box.append(label)
-        self.loading_row.set_child(box)
-        self.hosts_list.append(self.loading_row)
-        
+        self.first_radio_in_list = self.selected_host_card_data = None
+        self.main_connect_btn.set_sensitive(False); self.main_connect_btn.set_label('Conectar')
+        while row := self.hosts_list.get_row_at_index(0): self.hosts_list.remove(row)
+        self.loading_row = Gtk.ListBoxRow(); self.loading_row.set_selectable(False)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12); box.set_halign(Gtk.Align.CENTER)
+        for m in ['top', 'bottom']: getattr(box, f'set_margin_{m}')(12)
+        spinner = Gtk.Spinner(); spinner.start(); box.append(spinner); box.append(Gtk.Label(label='Procurando hosts...'))
+        self.loading_row.set_child(box); self.hosts_list.append(self.loading_row)
         def on_hosts_discovered(hosts):
-            # Limpar placeholder de loading
-            if self.loading_row.get_parent():
-                self.hosts_list.remove(self.loading_row)
-            
-            # Resetar novamente o grupo de radio buttons
+            if self.loading_row.get_parent(): self.hosts_list.remove(self.loading_row)
             self.first_radio_in_list = None
-            
             if not hosts:
-                row = Gtk.ListBoxRow()
-                row.set_selectable(False)
-                row.set_activatable(False)
-                
-                box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-                box.set_margin_top(24)
-                box.set_margin_bottom(24)
-                box.set_halign(Gtk.Align.CENTER)
-                
-                icon = Gtk.Image.new_from_icon_name('network-offline-symbolic')
-                icon.set_pixel_size(48)
-                icon.add_css_class('dim-label')
-                
-                lbl = Gtk.Label(label='Nenhum host encontrado')
-                lbl.add_css_class('title-2')
-                
-                box.append(icon)
-                box.append(lbl)
-                
-                row.set_child(box)
-                self.hosts_list.append(row)
+                row = Gtk.ListBoxRow(); row.set_selectable(False)
+                box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6); box.set_halign(Gtk.Align.CENTER)
+                for m in ['top', 'bottom']: getattr(box, f'set_margin_{m}')(24)
+                icon = Gtk.Image.new_from_icon_name('network-offline-symbolic'); icon.set_pixel_size(48); icon.add_css_class('dim-label')
+                lbl = Gtk.Label(label='Nenhum host encontrado'); lbl.add_css_class('title-2')
+                box.append(icon); box.append(lbl); row.set_child(box); self.hosts_list.append(row)
             else:
-                for host in hosts:
-                    self.hosts_list.append(self.create_host_row_custom(host))
-            
+                for h in hosts: self.hosts_list.append(self.create_host_row_custom(h))
             return False
-
-        discovery = NetworkDiscovery()
-        # Fix: Passar on_hosts_discovered diretamente. 
-        # A lambda anterior retornava o ID do idle_add (True), causando loop infinito no idle_add do network.py
-        discovery.discover_hosts(callback=on_hosts_discovered)
+        NetworkDiscovery().discover_hosts(callback=on_hosts_discovered)
 
     def update_hosts_list(self, hosts):
         # Limpar
@@ -522,281 +243,98 @@ class GuestView(Gtk.Box):
             self.hosts_list.append(self.create_host_row_custom(host))
 
     def create_host_row_custom(self, host):
-        """Cria uma linha com RadioButton para seleção"""
-        row = Gtk.ListBoxRow()
-        row.set_activatable(False)
-        row.set_selectable(False)
-        
+        row = Gtk.ListBoxRow(); row.set_activatable(False)
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        
-        # Radio Button (CheckButton in group)
-        radio = Gtk.CheckButton()
-        radio.set_valign(Gtk.Align.CENTER)
-        
-        # Adicionar o radio button primeiro antes de configurar o grupo
-        if self.first_radio_in_list is None:
-            self.first_radio_in_list = radio
-        else:
-            radio.set_group(self.first_radio_in_list)
-        
+        for m in ['start', 'end', 'top', 'bottom']: getattr(box, f'set_margin_{m}')(12)
+        radio = Gtk.CheckButton(); radio.set_valign(Gtk.Align.CENTER)
+        if self.first_radio_in_list is None: self.first_radio_in_list = radio
+        else: radio.set_group(self.first_radio_in_list)
         def on_toggled(btn):
             if btn.get_active():
-                self.selected_host_card_data = host
-                self.main_connect_btn.set_sensitive(True)
-                self.main_connect_btn.set_label(f"Conectar a {host['name']}")
-                print(f"DEBUG: Host selecionado: {host['name']}")
-        
+                self.selected_host_card_data = host; self.main_connect_btn.set_sensitive(True); self.main_connect_btn.set_label(f"Conectar a {host['name']}")
         radio.connect('toggled', on_toggled)
-        
-        # Ícone
-        icon = Gtk.Image.new_from_icon_name('computer-symbolic')
-        icon.set_pixel_size(32)
-        
-        # Info Box (Nome e IP)
-        info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        info.set_valign(Gtk.Align.CENTER)
-        
-        name_lbl = Gtk.Label(label=host['name'])
-        name_lbl.set_halign(Gtk.Align.START)
-        name_lbl.add_css_class('heading')
-        
-        ip_lbl = Gtk.Label(label=host['ip'])
-        ip_lbl.set_halign(Gtk.Align.START)
-        ip_lbl.add_css_class('dim-label')
-        
-        info.append(name_lbl)
-        info.append(ip_lbl)
-        
-        # Appends
-        box.append(radio)
-        box.append(icon)
-        box.append(info)
-        
-        row.set_child(box)
-        
-        # Adicionar GestureClick à linha inteira
-        gesture = Gtk.GestureClick()
-        gesture.connect("pressed", lambda gesture, n, x, y: self.on_row_clicked(gesture, radio, row, x, y))
-        row.add_controller(gesture)
-        
+        icon = Gtk.Image.new_from_icon_name('computer-symbolic'); icon.set_pixel_size(32)
+        info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2); info.set_valign(Gtk.Align.CENTER)
+        n = Gtk.Label(label=host['name']); n.set_halign(Gtk.Align.START); n.add_css_class('heading')
+        i = Gtk.Label(label=host['ip']); i.set_halign(Gtk.Align.START); i.add_css_class('dim-label')
+        info.append(n); info.append(i); box.append(radio); box.append(icon); box.append(info); row.set_child(box)
+        gesture = Gtk.GestureClick(); gesture.connect("pressed", lambda g, n, x, y: radio.set_active(True)); row.add_controller(gesture)
         return row
 
-    def on_row_clicked(self, gesture, radio_button, row, x, y):
-        """Handler para clique na linha"""
-        # Ativar o radio button quando a linha for clicada
-        radio_button.set_active(True)
-        return True
-        
     def create_manual_page(self):
-        """Cria página de conexão manual"""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        
-        # IP entry
-        ip_row = Adw.EntryRow()
-        ip_row.set_title('Endereço IP ou Hostname')
-        ip_row.set_text('192.168.')
-        
-        # Port entry
-        port_row = Adw.EntryRow()
-        port_row.set_title('Porta')
-        port_row.set_text('47989')
-
-        # IPv6 Toggle
-        ipv6_row = Adw.SwitchRow()
-        ipv6_row.set_title("Usar IPv6")
-        ipv6_row.set_subtitle("Marque se estiver usando endereço IPv6")
-        
-        # Connect button
-        connect_btn = Gtk.Button(label='Conectar')
-        connect_btn.add_css_class('suggested-action')
-        connect_btn.add_css_class('pill')
-        connect_btn.set_halign(Gtk.Align.CENTER)
-        connect_btn.set_size_request(200, -1)
-        connect_btn.set_margin_top(12)
-        connect_btn.connect('clicked', lambda b: self.connect_manual(ip_row.get_text(), port_row.get_text(), ipv6_row.get_active()))
-        
-        box.append(ip_row)
-        box.append(port_row)
-        box.append(ipv6_row)
-        box.append(connect_btn)
-        
+        for m in ['top', 'bottom']: getattr(box, f'set_margin_{m}')(12)
+        ip = Adw.EntryRow(); ip.set_title('IP/Hostname'); ip.set_text('192.168.')
+        port = Adw.EntryRow(); port.set_title('Porta'); port.set_text('47989')
+        ipv6 = Adw.SwitchRow(); ipv6.set_title("Usar IPv6")
+        btn = Gtk.Button(label='Conectar'); btn.add_css_class('suggested-action'); btn.add_css_class('pill')
+        btn.set_halign(Gtk.Align.CENTER); btn.set_size_request(200, -1); btn.set_margin_top(12)
+        btn.connect('clicked', lambda b: self.connect_manual(ip.get_text(), port.get_text(), ipv6.get_active()))
+        box.append(ip); box.append(port); box.append(ipv6); box.append(btn)
         return box
         
     def create_pin_page(self):
-        """Cria página de conexão por PIN"""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        
-        # Info
-        info_label = Gtk.Label()
-        info_label.set_markup(
-            '<span size="large">Digite o código PIN de 6 dígitos\n'
-            'fornecido pelo host</span>'
-        )
-        info_label.set_justify(Gtk.Justification.CENTER)
-        info_label.add_css_class('dim-label')
-        
-        # PIN entry
-        pin_entry = Gtk.Entry()
-        pin_entry.set_placeholder_text('000000')
-        pin_entry.set_max_length(6)
-        pin_entry.set_halign(Gtk.Align.CENTER)
-        pin_entry.set_size_request(200, -1)
-        pin_entry.add_css_class('title-1')
-        pin_entry.set_alignment(0.5)
-        
-        # Connect button
-        connect_btn = Gtk.Button(label='Conectar com PIN')
-        connect_btn.add_css_class('suggested-action')
-        connect_btn.add_css_class('pill')
-        connect_btn.set_halign(Gtk.Align.CENTER)
-        connect_btn.set_size_request(200, -1)
-        connect_btn.set_margin_top(12)
-        connect_btn.connect('clicked', lambda b: self.connect_pin(pin_entry.get_text()))
-        
-        box.append(info_label)
-        box.append(pin_entry)
-        box.append(connect_btn)
-        
+        for m in ['top', 'bottom']: getattr(box, f'set_margin_{m}')(12)
+        info = Gtk.Label(); info.set_markup('<span size="large">Digite o código PIN de 6 dígitos\nfornecido pelo host</span>')
+        info.set_justify(Gtk.Justification.CENTER); info.add_css_class('dim-label')
+        pin = Gtk.Entry(); pin.set_placeholder_text('000000'); pin.set_max_length(6); pin.set_halign(Gtk.Align.CENTER)
+        pin.set_size_request(200, -1); pin.add_css_class('title-1'); pin.set_alignment(0.5)
+        btn = Gtk.Button(label='Conectar com PIN'); btn.add_css_class('suggested-action'); btn.add_css_class('pill')
+        btn.set_halign(Gtk.Align.CENTER); btn.set_size_request(200, -1); btn.set_margin_top(12)
+        btn.connect('clicked', lambda b: self.connect_pin(pin.get_text()))
+        box.append(info); box.append(pin); box.append(btn)
         return box
-        
+    def connect_to_host(self, host):
+        self.show_loading(True)
+        def run():
+            if not self.moonlight.probe_host(host['ip']):
+                def on_pin(p): GLib.idle_add(lambda: self.show_pairing_dialog(host['ip'], p, None, host['name']))
+                if not self.moonlight.pair(host['ip'], on_pin): GLib.idle_add(lambda: (self.show_loading(False), self.show_error_dialog('Erro', 'Pareamento falhou'))); return
+            if self.scale_row.get_active():
+                res = self.get_auto_resolution()
+            else:
+                res_idx = self.resolution_row.get_selected()
+                res_map = {0: "1280x720", 1: "1920x1080", 2: "2560x1440", 3: "3840x2160"}
+                res = getattr(self, 'custom_resolution_val', '1920x1080') if res_idx == 4 else res_map.get(res_idx, "1920x1080")
+            
+            w, h = res.split('x') if 'x' in res else ("1920", "1080")
+            fps_idx = self.fps_row.get_selected(); fps_map = {0: "30", 1: "60", 2: "120"}
+            fps = getattr(self, 'custom_fps_val', '60') if fps_idx == 3 else fps_map.get(fps_idx, "60")
+            opts = {'width': w, 'height': h, 'fps': fps, 'bitrate': int(self.bitrate_scale.get_value() * 1000), 'display_mode': ['borderless', 'fullscreen', 'windowed'][self.display_mode_row.get_selected()], 'audio': self.audio_row.get_active(), 'hw_decode': self.hw_decode_row.get_active()}
+            if self.moonlight.connect(host['ip'], **opts): GLib.idle_add(lambda: (self.show_loading(False), self.perf_monitor.set_connection_status(host['name'], "Stream Ativo", True), self.perf_monitor.start_monitoring()))
+            else: GLib.idle_add(lambda: (self.show_loading(False), self.show_error_dialog('Erro', 'Falha ao conectar')))
+        threading.Thread(target=run, daemon=True).start()
+
 
     def show_loading(self, show=True, message=""):
-        """Mostra/Oculta status de carregamento"""
-        # ProgressBar
         if hasattr(self, 'loading_bar'):
              self.loading_bar.set_visible(show)
-             if show:
-                 self.loading_bar.pulse()
-        
-        # Atualizar texto de status para feedback se houver mensagem
-        # if show and message and hasattr(self, 'status_sublabel'):
-        #      self.status_sublabel.set_text(message)
-             
-        # Force UI update
+             if show: self.loading_bar.pulse()
         context = GLib.MainContext.default()
-        while context.pending():
-            context.iteration(False)
+        while context.pending(): context.iteration(False)
                 
     def show_pin_dialog(self, pin):
-        """Mostra o diálogo com o PIN e instruções"""
-        if self.pin_dialog:
-            self.pin_dialog.close()
-            
-        self.pin_dialog = Adw.MessageDialog(
-            heading='Pareamento Necessário',
-            body=(
-                f'O Moonlight precisa ser pareado com o servidor.\n\n'
-                f'<span size="xx-large" weight="bold" color="accent-color">{pin}</span>\n\n'
-                f'<b>Próximos Passos:</b>\n'
-                f'1. Clique em "Abrir Painel Sunshine" abaixo (ou acesse https://localhost:47990)\n'
-                f'2. No menu superior do site, clique em <b>PIN</b>\n'
-                f'3. Digite o código acima e clique em Send'
-            )
-        )
-        self.pin_dialog.set_body_use_markup(True)
-        
-        self.pin_dialog.add_response('cancel', 'Cancelar')
-        self.pin_dialog.add_response('open_url', 'Abrir Painel Sunshine')
-        
-        self.pin_dialog.set_response_appearance('open_url', Adw.ResponseAppearance.SUGGESTED)
-        
-        def on_response(dialog, response):
-            if response == 'open_url':
-                # Reabrir dialogo já que ele fecha ao responder
-                # Mas espera, se fechar perde o PIN? 
-                # AdwMessageDialog fecha auto. Vamos abrir a URL e tentar manter ou não.
-                # Melho: Apenas abrir URL e o usuario reabre se precisar (mas o pairing background continua)
-                import webbrowser
-                webbrowser.open('https://localhost:47990/pin')
-                # O ideal seria não fechar, mas MessageDialog é modal simples.
-                # Vamos re-exibir o dialogo se clicar em abrir?
-                # Ou usar um CustomDialog... Para simplificar, vamos instruir.
-                # Como o processo de fundo espera, se o dialogo fechar, o usuario pode perder o PIN visualmente.
-                # Hack: Emitir signal para reabrir? 
-                # Na verdade, se clicar em Open URL, ele fecha. Vamos impedir isso? 
-                # AdwMessageDialog nao permite impedir fechamento facil no response.
-                # Workaround: Re-mostrar imediatamente.
-                self.show_pin_dialog(pin)
-            
-        self.pin_dialog.connect('response', on_response)
-        
-        self.pin_dialog.present()
-        
-    def close_pin_dialog(self):
-        if self.pin_dialog:
-            self.pin_dialog.close()
-            self.pin_dialog = None
+        if self.pin_dialog: self.pin_dialog.close()
+        self.pin_dialog = Adw.MessageDialog(heading='Pareamento Necessário', body=f'O Moonlight precisa ser pareado.\n\n<span size="xx-large" weight="bold" color="accent-color">{pin}</span>')
+        self.pin_dialog.set_body_use_markup(True); self.pin_dialog.add_response('cancel', 'Cancelar'); self.pin_dialog.present()
+    def close_pin_dialog(self): (self.pin_dialog.close() if self.pin_dialog else None); self.pin_dialog = None
 
     def show_pairing_dialog(self, host_ip, pin=None, on_confirm=None, hostname=None):
-        """Mostra diálogo para pareamento (Manual ou Automático)"""
         if hasattr(self, 'pairing_dialog') and self.pairing_dialog:
-            # Se já existe, apenas atualiza o corpo senao fecha e recria (pra simplificar)
             if pin:
-                # Atualizar texto com o PIN
-                body_text = (
-                    f'<span size="xx-large" weight="bold" color="#3584e4">{pin}</span>\n\n'
-                    f'Siga as instruções.\n\n'
-                    f'Uma janela do Moonlight deve abrir com o código PIN e o nome do Host.\n\n'
-                    f'<b>Passos:</b>\n'
-                    f'1. Informe o PIN e o Host <b>{hostname or ""}</b> para o Servidor Hospedeiro.\n'
-                    f'2. O Hospedeiro deverá entrar em "Configurações Sunshine" e/ou acessar "https://localhost:47990/pin"\n'
-                    f'3. O Hospedeiro precisa preencher o PIN e Device Name (Host)\n'
-                    f'4. Confirme apertando o botão Send.\n\n'
-                    f'Assim que o PIN e Host forem incluídos a tela será compartilhada na janela do Moonlight.'
-                )
-                self.pairing_dialog.set_body(body_text)
+                self.pairing_dialog.set_body(f'<span size="xx-large" weight="bold" color="#3584e4">{pin}</span>\n\nSiga as instruções.\n\n1. Informe o PIN e Host <b>{hostname or ""}</b> ao servidor.\n2. No host, acesse Configurações Sunshine.\n3. Preencha PIN e Host.\n4. Clique em Send.')
                 return
 
-        # Fechar anteriores
-        if hasattr(self, 'pairing_dialog') and self.pairing_dialog:
-             self.pairing_dialog.close()
-             
-        # Texto atualizado
-        body_text = (
-            f'Siga as instruções.\n\n'
-            f'Uma janela do Moonlight deve abrir com o código PIN e o nome do Host.\n\n'
-            f'<b>Passos:</b>\n'
-            f'1. Informe o PIN e o Host <b>{hostname or ""}</b> para o Servidor Hospedeiro.\n'
-            f'2. O Hospedeiro deverá entrar em "Configurações Sunshine" e/ou acessar "https://localhost:47990/pin"\n'
-            f'3. O Hospedeiro precisa preencher o PIN e Device Name (Host)\n'
-            f'4. Confirme apertando o botão Send.\n\n'
-            f'Assim que o PIN e Host forem incluídos a tela será compartilhada na janela do Moonlight.'
-        )
-        
-        if pin:
-             # Se tiver PIN capturado, mostrar ele em destaque no topo
-             body_text = (
-                f'<span size="xx-large" weight="bold" color="#3584e4">{pin}</span>\n\n' + body_text
-            )
-
-        self.pairing_dialog = Adw.MessageDialog(
-            heading='Pareamento Iniciado',
-            body=body_text
-        )
-        self.pairing_dialog.set_body_use_markup(True)
-        # Tentar aumentar tamanho
-        self.pairing_dialog.set_default_size(600, 450)
-        self.pairing_dialog.set_resizable(True) # Permitir redimensionar se precisar
-        
-        self.pairing_dialog.add_response('ok', 'OK')
-        
-        self.pairing_dialog.set_response_appearance('ok', Adw.ResponseAppearance.SUGGESTED)
-        
-        def on_response(dialog, response):
-            if response == 'ok':
-                if on_confirm:
-                    on_confirm()
-            
-        self.pairing_dialog.connect('response', on_response)
-        self.pairing_dialog.present()
+        if hasattr(self, 'pairing_dialog') and self.pairing_dialog: self.pairing_dialog.close()
+        body = f'Siga as instruções.\n\n1. Informe o PIN e Host <b>{hostname or ""}</b> ao servidor.\n2. No host, acesse Configurações Sunshine.\n3. Preencha PIN e Host.\n4. Clique em Send.'
+        if pin: body = f'<span size="xx-large" weight="bold" color="#3584e4">{pin}</span>\n\n' + body
+        self.pairing_dialog = Adw.MessageDialog(heading='Pareamento Iniciado', body=body)
+        self.pairing_dialog.set_body_use_markup(True); self.pairing_dialog.set_default_size(600, 450); self.pairing_dialog.set_resizable(True)
+        self.pairing_dialog.add_response('ok', 'OK'); self.pairing_dialog.set_response_appearance('ok', Adw.ResponseAppearance.SUGGESTED)
+        def on_resp(dlg, resp):
+            if resp == 'ok' and on_confirm: on_confirm()
+        self.pairing_dialog.connect('response', on_resp); self.pairing_dialog.present()
         
     def close_pairing_dialog(self):
         if hasattr(self, 'pairing_dialog') and self.pairing_dialog:
@@ -804,233 +342,34 @@ class GuestView(Gtk.Box):
             self.pairing_dialog = None
 
     def get_auto_resolution(self):
-        """Detecta resolução do monitor atual"""
         try:
-            display = Gdk.Display.get_default()
-            monitors = display.get_monitors()
-            # Tentar monitor onde a janela está
-            root = self.get_root()
-            monitor = None
-            if root:
-                 native = root.get_native()
-                 if native:
-                     surface = native.get_surface()
-                     if surface:
-                         monitor = display.get_monitor_at_surface(surface)
-            
-            if not monitor and monitors.get_n_items() > 0:
-                 monitor = monitors.get_item(0)
-                 
+            display = Gdk.Display.get_default(); monitor = None
+            if root := self.get_root():
+                if native := root.get_native():
+                    if surface := native.get_surface(): monitor = display.get_monitor_at_surface(surface)
+            if not monitor:
+                monitors = display.get_monitors()
+                if monitors.get_n_items() > 0: monitor = monitors.get_item(0)
             if monitor:
-                geometry = monitor.get_geometry()
-                return f"{geometry.width}x{geometry.height}"
-        except Exception as e:
-            print(f"Erro ao detectar resolução: {e}")
-            
-        return "1920x1080" # Fallback
+                r = monitor.get_geometry(); return f"{r.width}x{r.height}"
+        except: pass
+        return "1920x1080"
 
-    def connect_to_host(self, host):
-        """Conecta a um host (Threaded Flow)"""
-        from guest.moonlight_client import MoonlightClient
-        import threading
-        from gi.repository import GLib
-
-        def connection_flow():
-            try:
-                GLib.idle_add(lambda: self.show_loading(True, "Verificando host..."))
-                
-                # 1. Verificar se Host precisa parear
-                print(f"DEBUG: Probing host {host['ip']}...")
-                is_paired = self.moonlight.probe_host(host['ip'])
-                print(f"DEBUG: Host paired status: {is_paired}")
-                
-                if not is_paired:
-                    GLib.idle_add(lambda: self.show_loading(True, "Iniciando pareamento..."))
-                    print(f"Host {host['ip']} não pareado. Iniciando pareamento...")
-                    
-                    # Definir ação de continuação (quando usuario clicar em Continuar)
-                    def on_user_confirmed():
-                        threading.Thread(target=do_connect).start()
-                    
-                    # Callback para atualizar PIN se capturado
-                    def on_pin(pin):
-                        GLib.idle_add(lambda: self.show_pairing_dialog(host['ip'], pin, on_user_confirmed, host['name']))
-                    
-                    # Executa pareamento (Bloqueante)
-                    success = self.moonlight.pair(host['ip'], on_pin)
-                    
-                    if success:
-                        GLib.idle_add(self.close_pairing_dialog)
-                        GLib.idle_add(lambda: self.show_loading(True, "Pareamento concluído. Conectando..."))
-                        do_connect()
-                    else:
-                        GLib.idle_add(lambda: self.show_error_dialog("Falha no Pareamento", 
-                            "O processo de pareamento falhou ou foi cancelado."))
-                        GLib.idle_add(self.close_pairing_dialog)
-                        GLib.idle_add(lambda: self.show_loading(False))
-                    
-                    return
-
-                # Se já estava pareado
-                GLib.idle_add(lambda: self.show_loading(True, "Iniciando streaming..."))
-                do_connect()
-                
-            except Exception as e:
-                print(f"ERROR: Exception in connection_flow: {e}")
-                import traceback
-                traceback.print_exc()
-                GLib.idle_add(lambda: self.show_error_dialog("Erro Interno", f"Erro ao conectar: {str(e)}"))
-                GLib.idle_add(lambda: self.show_loading(False))
-
-        def do_connect():
-            GLib.idle_add(safe_connect_step)
-            
-        def safe_connect_step():
-            self.show_loading(True, "Conectando...")
-            
-        def safe_connect_step():
-            self.show_loading(True, "Conectando...")
-            
-            # Obter configurações
-            use_native_scale = self.scale_row.get_active()
-            resolution = None
-            
-            if not use_native_scale:
-             # Obter configurações da UI (Novo Formato)
-             # Resolução
-             res_idx = self.resolution_row.get_selected()
-             res_model = self.resolution_row.get_model()
-             res_string = res_model.get_string(res_idx)
-             
-             if res_string.startswith("Custom"):
-                 resolution = self.custom_resolution_val if self.custom_resolution_val else '1920x1080'
-             else:
-                 resolution = res_string.replace('p', '').replace('4K', '3840x2160').replace('720', '1280x720').replace('1080', '1920x1080').replace('1440', '2560x1440')
-                 # Fallback simples
-                 res_map = {0: '1280x720', 1: '1920x1080', 2: '2560x1440', 3: '3840x2160'}
-                 if res_idx < 4:
-                     resolution = res_map[res_idx]
-            else:
-                resolution = self.get_auto_resolution()
-                print(f"Resolução Nativa Detectada: {resolution}")
-
-            # FPS
-            fps_idx = self.fps_row.get_selected()
-            fps_model = self.fps_row.get_model()
-            fps_string = fps_model.get_string(fps_idx)
-            
-            if fps_string.startswith("Custom"):
-                 fps = self.custom_fps_val if self.custom_fps_val else '60'
-            else:
-                 fps = fps_string.split(' ')[0] # "60 FPS" -> "60"
-            
-            # Bitrate (Mbps -> Kbps)
-            bitrate_mbps = self.bitrate_scale.get_value()
-            bitrate_kbps = int(bitrate_mbps * 1000)
-            
-            # Display Mode
-            disp_idx = self.display_mode_row.get_selected()
-            # Display Mode
-            disp_idx = self.display_mode_row.get_selected()
-            # 0=Borderless, 1=Fullscreen, 2=Windowed
-            disp_map = {0: 'borderless', 1: 'fullscreen', 2: 'windowed'}
-            display_mode = disp_map.get(disp_idx, 'borderless')
-
-            audio = self.audio_row.get_active()
-            hw_decode = self.hw_decode_row.get_active()
-            hw_decode = self.hw_decode_row.get_active()
-
-            # Executar lógica de conexão
-            try:
-                # Verificar instalação
-                if not self.moonlight.moonlight_cmd:
-                     self.show_error_dialog('Moonlight Não Encontrado', 'Moonlight não instalado.')
-                     self.show_loading(False)
-                     return
-
-                # Connect
-                self.close_pairing_dialog() # Garantir fechamento
-                
-                success = self.moonlight.connect(
-                    host['ip'],
-                    # Se resolution for None, connect deve lidar (não passar flag)
-                    width=resolution.split('x')[0] if resolution and 'x' in resolution else None, 
-                    height=resolution.split('x')[1] if resolution and 'x' in resolution else None,
-                    fps=fps,
-                    bitrate=bitrate_kbps,
-                    display_mode=display_mode,
-                    audio=audio,
-                    hw_decode=hw_decode
-                )
-                
-                if success:
-                    self.show_toast(f'Conectando a {host["name"]}...')
-                    self.is_connected = True
-                    
-                    # Store context for reconnection
-                    self.current_host_ctx = {'type': 'auto', 'host': host}
-                    
-                    self.update_ui_state()
-                    
-                    self.perf_monitor.set_connection_status(host["name"], "Iniciando sessão...", True)
-                    
-                    # status_label removed
-                    # status_sublabel removed 
-                    # status_icon removed
-                    
-                    self.perf_monitor.set_visible(True)
-                    self.perf_monitor.start_monitoring()
-                else:
-                    self.show_error_dialog('Falha na Conexão', 'Não foi possível iniciar o Moonlight.')
-                        
-            except Exception as e:
-                self.show_error_dialog('Erro', f'Ocorreu um erro: {e}')
-                
-            self.show_loading(False)
-
-        # Iniciar thread
-        threading.Thread(target=connection_flow).start()
-        
     def connect_manual(self, ip, port, ipv6=False):
-        """Conecta manualmente via IP"""
-        if not ip:
-            return
-            
-        # Ensure brackets if IPv6 selected or detected without them
-        if ipv6 and ":" in ip and not ip.startswith("["):
-            ip = f"[{ip}]"
-            
-        host = {
-            'name': ip,
-            'ip': ip,
-            'port': int(port) if port else 47989,
-            'status': 'unknown'
-        }
-        
-        # Store context (manual)
+        if not ip: return
+        if ipv6 and ":" in ip and not ip.startswith("["): ip = f"[{ip}]"
         self.current_host_ctx = {'type': 'manual', 'ip': ip, 'port': port, 'ipv6': ipv6}
-        
-        self.connect_to_host(host)
-        
+        self.connect_to_host({'name': ip, 'ip': ip, 'port': int(port) if port else 47989})
+
     def connect_pin(self, pin):
-        """Conecta via PIN"""
-        if len(pin) != 6 or not pin.isdigit():
-            self.show_error_dialog('PIN Inválido',
-                'O PIN deve conter exatamente 6 dígitos.')
-            return
-        
-        self.show_loading(True, "Procurando host com este PIN...")
-        
-        def resolve_thread():
+        if len(pin) != 6 or not pin.isdigit(): self.show_error_dialog('PIN Inválido', 'Deve conter 6 dígitos.'); return
+        self.show_loading(True)
+        def resolve():
              from utils.network import NetworkDiscovery
              ip = NetworkDiscovery().resolve_pin(pin)
-             
-             if ip:
-                 GLib.idle_add(lambda: self._on_pin_resolved(ip, pin))
-             else:
-                 GLib.idle_add(lambda: self._on_pin_failed())
-                 
-        threading.Thread(target=resolve_thread, daemon=True).start()
+             if ip: GLib.idle_add(lambda: self.connect_manual(ip, '47989'))
+             else: GLib.idle_add(lambda: (self.show_loading(False), self.show_error_dialog('Não Encontrado', 'Verifique a rede')))
+        threading.Thread(target=resolve, daemon=True).start()
         
     def _on_pin_resolved(self, ip, pin):
         """Callback quando PIN é resolvido"""
@@ -1048,272 +387,72 @@ class GuestView(Gtk.Box):
             'Verifique se o host está rodando e na mesma rede.')
     
     def show_error_dialog(self, title, message):
-        """Mostra diálogo de erro"""
         dialog = Adw.MessageDialog.new(self.get_root())
-        dialog.set_heading(title)
-        dialog.set_body(message)
-        dialog.add_response('ok', 'OK')
-        dialog.set_response_appearance('ok', Adw.ResponseAppearance.DEFAULT)
-        dialog.present()
+        dialog.set_heading(title); dialog.set_body(message)
+        dialog.add_response('ok', 'OK'); dialog.present()
     
     def on_resolution_changed(self, row, param):
-        """Handler para mudança de resolução"""
-        model = row.get_model()
-        idx = row.get_selected()
-        item = model.get_string(idx)
-        
-        if item.startswith("Custom"):
-            # Se for clique direto no Custom original ou re-seleção
-            # Mostrar dialog
-            def on_set(value):
-                if value and 'x' in value:
-                     # Atualizar texto do item
-                     # GtkStringList não é mutável facilmente item a item, mas podemos trocar o ultimo?
-                     # Na verdade nao da pra editar string list in place facilmente sem remover/adicionar
-                     # Vamos guardar o valor numa variavel e atualizar o label visualmente se der
-                     # Workaround: Apenas guardar o valor e usar toast
-                     self.custom_resolution_val = value
-                     self.show_toast(f"Resolução definida: {value}")
-                     
-                     # Tentar atualizar o modelo (remover ultimo e add novo)
-                     n_items = model.get_n_items()
-                     # Assumindo que Custom é o ultimo
-                     # Mas remover o item selecionado pode mudar a selecao
-                     # Melhor abordagem não intrusiva: Deixar "Custom" e usar self.custom_resolution_val
-                     # O Usuario pediu: apareça "Custom (valor informado)"
-                     # Então vamos tentar substituir a string no modelo
-                     
-                     # Hack: GtkStringList é imutavel? splice() pode funcionar
-                     # model.splice(idx, 1, [f"Custom ({value})"])
-                     # Mas isso pode disparar notify novamente?
-                     # Vamos tentar bloquear sinal?
-                     # freeze_notify não impede o sinal notify::selected-item se mudarmos a seleção ou o modelo
-                     # O problema é que splice altera o indices/itens e o set_selected dispara o notify novamente
-                     # Solução: Desconectar sinal temporariamente
-                     
-                     row.disconnect_by_func(self.on_resolution_changed)
-                     
-                     model.splice(idx, 1, [f"Custom ({value})"])
-                     row.set_selected(idx) # Manter selecionado
-                     
-                     row.set_selected(idx) # Manter selecionado
-                     
-                     
-                     # Trigger reconnect
-                     # self.check_reconnect()
-                     
-                     self.save_guest_settings()
-                else:
-                    self.show_error_dialog("Inválido", "Formato deve ser LARGURAxALTURA (ex: 1920x1080)")
-                    # Bloquear sinal para evitar loop ao restaurar seleção
+        m = row.get_model(); idx = row.get_selected()
+        if m.get_string(idx).startswith("Custom"):
+            def on_set(v):
+                if v and 'x' in v:
+                    self.custom_resolution_val = v; self.show_toast(f"Definido: {v}")
                     row.disconnect_by_func(self.on_resolution_changed)
-                    row.set_selected(1) # Voltar para 1080p
-                    row.connect("notify::selected-item", self.on_resolution_changed)
-
-            self.show_custom_input_dialog(
-                "Definir Resolução", 
-                "Digite a resolução (LxA):", 
-                "1920x1080", 
-                on_set
-            )
+                    m.splice(idx, 1, [f"Custom ({v})"]); row.set_selected(idx); self.save_guest_settings()
+                else: self.show_error_dialog("Inválido", "Use LxA"); row.disconnect_by_func(self.on_resolution_changed); row.set_selected(1); row.connect("notify::selected-item", self.on_resolution_changed)
+            self.show_custom_input_dialog("Resolução", "Digite LxA:", "1920x1080", on_set)
 
         # else:
         #      self.check_reconnect()
             
     def on_fps_changed(self, row, param):
-        """Handler para mudança de FPS"""
-        model = row.get_model()
-        idx = row.get_selected()
-        item = model.get_string(idx)
-        
-        if item.startswith("Custom"):
-             def on_set(value):
-                if value and value.isdigit():
-                     self.custom_fps_val = value
-                     self.show_toast(f"FPS definido: {value}")
-                     
-                     row.disconnect_by_func(self.on_fps_changed)
-                     
-                     model.splice(idx, 1, [f"Custom ({value})"])
-                     row.set_selected(idx)
-                     
-                     row.set_selected(idx)
-                     
-                     row.connect("notify::selected-item", self.on_fps_changed)
-                     
-                     # Trigger reconnect
-                     # self.check_reconnect()
-                     
-                     
-                     # Trigger reconnect
-                     # self.check_reconnect()
-                     
-                     self.save_guest_settings()
-                else:
-                     self.show_error_dialog("Inválido", "FPS deve ser um número inteiro.")
-                     row.disconnect_by_func(self.on_fps_changed)
-                     row.set_selected(1)
-                     row.connect("notify::selected-item", self.on_fps_changed)
-                     
-             self.show_custom_input_dialog(
-                "Definir FPS", 
-                "Digite a taxa de quadros:", 
-                "60", 
-                on_set
-            )
-        # else:
-        #     self.check_reconnect()
+        m = row.get_model(); idx = row.get_selected()
+        if m.get_string(idx).startswith("Custom"):
+            def on_set(v):
+                if v and v.isdigit():
+                    self.custom_fps_val = v; self.show_toast(f"FPS: {v}")
+                    row.disconnect_by_func(self.on_fps_changed); m.splice(idx, 1, [f"Custom ({v})"]); row.set_selected(idx); row.connect("notify::selected-item", self.on_fps_changed); self.save_guest_settings()
+                else: self.show_error_dialog("Inválido", "Use número"); row.disconnect_by_func(self.on_fps_changed); row.set_selected(1); row.connect("notify::selected-item", self.on_fps_changed)
+            self.show_custom_input_dialog("FPS", "Digite o valor:", "60", on_set)
 
     def on_scale_changed(self, row, param):
-        """Handler para mudança de Scale"""
-        active = row.get_active()
-        self.resolution_row.set_sensitive(not active)
-        if active:
-            self.show_toast("Resolução definida para automática/nativa")
-            
+        self.resolution_row.set_sensitive(not row.get_active())
+        if row.get_active(): self.show_toast("Automática")
         self.save_guest_settings()
 
     def show_custom_input_dialog(self, title, message, default_text, callback):
-        """Mostra diálogo de entrada simples"""
         dialog = Adw.MessageDialog.new(self.get_root())
-        dialog.set_heading(title)
-        dialog.set_body(message)
-        
-        # Adicionar Entry
-        # AdwMessageDialog set_extra_child
-        entry = Gtk.Entry()
-        entry.set_text(default_text)
-        entry.set_halign(Gtk.Align.CENTER)
-        
-        dialog.set_extra_child(entry)
-        
-        dialog.add_response('cancel', 'Cancelar')
-        dialog.add_response('ok', 'OK')
-        dialog.set_response_appearance('ok', Adw.ResponseAppearance.SUGGESTED)
-        
-        def on_response(dlg, response):
-            if response == 'ok':
-                callback(entry.get_text())
-            # else cancel, do nothing (selection remains but val not set? caller handles revert)
-            
-        dialog.connect('response', on_response)
-        dialog.present()
+        dialog.set_heading(title); dialog.set_body(message)
+        entry = Gtk.Entry(); entry.set_text(default_text); entry.set_halign(Gtk.Align.CENTER); dialog.set_extra_child(entry)
+        dialog.add_response('cancel', 'Cancelar'); dialog.add_response('ok', 'OK'); dialog.set_response_appearance('ok', Adw.ResponseAppearance.SUGGESTED)
+        def on_resp(dlg, resp):
+            if resp == 'ok': callback(entry.get_text())
+        dialog.connect('response', on_resp); dialog.present()
 
-    def show_toast(self, message):
-        """Mostra toast notification"""
-        window = self.get_root()
-        if hasattr(window, 'show_toast'):
-            window.show_toast(message)
-        else:
-            print(f"Toast: {message}")
-
-    def cleanup(self):
-        """Limpa recursos ao fechar"""
-        # Parar monitoramento
-        if hasattr(self, 'perf_monitor'):
-            self.perf_monitor.stop_monitoring()
-            
-        # Desconectar Moonlight se estiver rodando quit() ou disconnect()
-        if hasattr(self, 'moonlight'):
-            # TODO: Implementar disconnect no moonlight_client
-            pass
-
+    def cleanup(self): (self.perf_monitor.stop_monitoring() if hasattr(self, 'perf_monitor') else None)
     def connect_settings_signals(self):
-        """Conecta sinais de mudança para salvar config"""
-        # Os combos já chamam handlers, adicionar save neles ou aqui?
-        # Adicionar aqui para coisas que não tem handler especifico ainda ou modificar handlers
-        
-        # Resolution/FPS/Scale salvam em seus handlers (vou adicionar chamada)
-        
-        # Bitrate
         self.bitrate_scale.connect("value-changed", lambda w: self.save_guest_settings())
-        
-        # Display Mode
-        self.display_mode_row.connect("notify::selected-item", lambda *x: self.save_guest_settings())
-        
-        # Audio
-        self.audio_row.connect("notify::active", lambda *x: self.save_guest_settings())
-        
-        # HW Decode
-        self.hw_decode_row.connect("notify::active", lambda *x: self.save_guest_settings())
-
+        for r in [self.display_mode_row, self.audio_row, self.hw_decode_row]: r.connect("notify::selected-item" if isinstance(r, Adw.ComboRow) else "notify::active", lambda *x: self.save_guest_settings())
     def save_guest_settings(self):
-        """Salva configurações atuais no arquivo"""
-        settings = {
-            'quality': 'custom', # Flag genérica
-            'resolution_idx': self.resolution_row.get_selected(),
-            'custom_resolution': getattr(self, 'custom_resolution_val', ''),
-            'scale_native': self.scale_row.get_active(),
-            'fps_idx': self.fps_row.get_selected(),
-            'custom_fps': getattr(self, 'custom_fps_val', ''),
-            'bitrate': self.bitrate_scale.get_value(),
-            'display_mode_idx': self.display_mode_row.get_selected(),
-            'audio': self.audio_row.get_active(),
-            'hw_decode': self.hw_decode_row.get_active()
-        }
-        self.config.set('guest', settings)
-        # print("Configurações salvas")
-
+        s = {'quality':'custom','resolution_idx':self.resolution_row.get_selected(),'custom_resolution':getattr(self,'custom_resolution_val',''),'scale_native':self.scale_row.get_active(),'fps_idx':self.fps_row.get_selected(),'custom_fps':getattr(self,'custom_fps_val',''),'bitrate':self.bitrate_scale.get_value(),'display_mode_idx':self.display_mode_row.get_selected(),'audio':self.audio_row.get_active(),'hw_decode':self.hw_decode_row.get_active()}
+        self.config.set('guest', s)
     def load_guest_settings(self):
-        """Carrega configurações do arquivo"""
-        settings = self.config.get('guest', {})
-        if not settings:
-            return
-            
+        s = self.config.get('guest', {})
+        if not s: return
         try:
-            # Scale
-            self.scale_row.set_active(settings.get('scale_native', False))
-            
-            # Resolution
-            self.resolution_row.set_selected(settings.get('resolution_idx', 1))
-            self.custom_resolution_val = settings.get('custom_resolution', '')
-            # Update custom label if needed? (Complexo sem acesso ao model, mas ok)
-            
-            # FPS
-            self.fps_row.set_selected(settings.get('fps_idx', 1))
-            self.custom_fps_val = settings.get('custom_fps', '')
-            
-            # Bitrate
-            self.bitrate_scale.set_value(settings.get('bitrate', 20.0))
-            
-            # Display Mode
-            self.display_mode_row.set_selected(settings.get('display_mode_idx', 0))
-            
-            # Audio/HW
-            self.audio_row.set_active(settings.get('audio', True))
-            self.hw_decode_row.set_active(settings.get('hw_decode', True))
-            
-        except Exception as e:
-            print(f"Erro ao carregar settings guest: {e}")
-
-    def on_reset_clicked(self, btn):
-        """Confirma e reseta configurações"""
-        dialog = Adw.MessageDialog.new(self.get_root())
-        dialog.set_heading("Restaurar Padrão")
-        dialog.set_body("Deseja restaurar as configurações recomendadas?")
-        dialog.add_response("cancel", "Cancelar")
-        dialog.add_response("reset", "Restaurar")
-        dialog.set_response_appearance("reset", Adw.ResponseAppearance.DESTRUCTIVE)
-        
-        def on_response(dlg, response):
-            if response == "reset":
-                self.reset_to_defaults()
-        
-        dialog.connect("response", on_response)
-        dialog.present()
-        
+            self.scale_row.set_active(s.get('scale_native', False)); self.resolution_row.set_selected(s.get('resolution_idx', 1))
+            self.custom_resolution_val = s.get('custom_resolution', ''); self.fps_row.set_selected(s.get('fps_idx', 1))
+            self.custom_fps_val = s.get('custom_fps', ''); self.bitrate_scale.set_value(s.get('bitrate', 20.0))
+            self.display_mode_row.set_selected(s.get('display_mode_idx', 0)); self.audio_row.set_active(s.get('audio', True)); self.hw_decode_row.set_active(s.get('hw_decode', True))
+        except: pass
+    def on_reset_clicked(self, b):
+        d = Adw.MessageDialog.new(self.get_root()); d.set_heading("Reset"); d.set_body("Restaurar padrões?"); d.add_response("cancel", "Não"); d.add_response("ok", "Sim"); d.set_response_appearance("ok", Adw.ResponseAppearance.DESTRUCTIVE)
+        def on_r(dlg, r): (self.reset_to_defaults() if r == "ok" else None)
+        d.connect("response", on_r); d.present()
     def reset_to_defaults(self):
-        """Aplica valores padrão"""
-        self.scale_row.set_active(False)
-        self.resolution_row.set_selected(1) # 1080p
-        self.fps_row.set_selected(1) # 60 FPS
-        self.bitrate_scale.set_value(20.0)
-        self.display_mode_row.set_selected(0) # Borderless
-        self.audio_row.set_active(True)
-        self.hw_decode_row.set_active(True)
-        
-        self.custom_resolution_val = ''
-        self.custom_fps_val = ''
-        
-        self.show_toast("Configurações restauradas")
-        self.save_guest_settings()
+        self.scale_row.set_active(False); self.resolution_row.set_selected(1); self.fps_row.set_selected(1); self.bitrate_scale.set_value(20.0); self.display_mode_row.set_selected(0); self.audio_row.set_active(True); self.hw_decode_row.set_active(True)
+        self.custom_resolution_val = self.custom_fps_val = ''; self.show_toast("Restaurado"); self.save_guest_settings()
+    def show_toast(self, m):
+        w = self.get_root()
+        if hasattr(w, 'show_toast'): w.show_toast(m)
+        else: print(f"Toast: {m}")

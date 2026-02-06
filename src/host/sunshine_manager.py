@@ -1,51 +1,18 @@
-"""
-Módulo Host - Gerenciamento do Sunshine
-"""
-
-import subprocess
-import signal
-import os
+import subprocess, signal, os, shutil
 from pathlib import Path
-from typing import Optional
-
 class SunshineHost:
-    """Gerenciador do servidor Sunshine"""
-    
-    def __init__(self, config_dir: Optional[Path] = None):
-        if config_dir is None:
-            self.config_dir = Path.home() / '.config' / 'big-remoteplay' / 'sunshine'
-        else:
-            self.config_dir = config_dir
-            
+    def __init__(self, cdir: Path = None):
+        self.config_dir = cdir or (Path.home() / '.config' / 'big-remoteplay' / 'sunshine')
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        
         self.process = None
         self.pid = None
         
-    def start(self, **kwargs) -> bool:
-        """
-        Inicia o servidor Sunshine
-        
-        Args:
-            **kwargs: Argumentos opcionais para configuração
-        """
-        if self.is_running():
-            print("Sunshine já está em execução")
-            return False
-            
+    def start(self, **kwargs):
+        if self.is_running(): return False
+        sc = shutil.which('sunshine')
+        if not sc: return False
         try:
             config_file = self.config_dir / 'sunshine.conf'
-            
-            # O arquivo de configuração é gerado pelo HostView antes de chamar start()
-            pass
-            
-            # Verificar comando
-            import shutil
-            sunshine_cmd = shutil.which('sunshine')
-            if not sunshine_cmd:
-                print("Sunshine não encontrado no PATH")
-                return False
-
             # Preparar ambiente
             env = os.environ.copy()
             if 'DISPLAY' not in env:
@@ -68,7 +35,7 @@ class SunshineHost:
                 env['WAYLAND_DISPLAY'] = os.environ['WAYLAND_DISPLAY']
 
             cmd = [
-                sunshine_cmd,
+                sc,
                 str(config_file)
             ]
             

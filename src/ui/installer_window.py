@@ -1,21 +1,9 @@
-
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-
-try:
-    # Try to load VTE for GTK4 (usually version 3.91)
-    gi.require_version('Vte', '3.91')
-    from gi.repository import Vte
-    HAS_VTE = True
-except (ValueError, ImportError):
-    HAS_VTE = False
-
+gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')
+try: gi.require_version('Vte', '3.91'); from gi.repository import Vte; HAS_VTE = True
+except: HAS_VTE = False
 from gi.repository import Gtk, Adw, GLib, Gio
-import subprocess
-import os
-
-import shutil
+import subprocess, os, shutil
 
 class InstallerWindow(Adw.Window):
     """Janela de instalação de dependências"""
@@ -84,72 +72,21 @@ class InstallerWindow(Adw.Window):
         box.append(self.close_btn)
 
     def start_external_installation(self):
-        install_cmd = "yay -S --noconfirm --needed sunshine moonlight-qt vte4"
-        shell_cmd = f"{install_cmd}; echo ''; echo 'Instalação concluída! Pressione Enter para fechar...'; read"
-        
-        terminals = [
-            ['konsole', '-e', 'bash', '-c', shell_cmd],
-            ['gnome-terminal', '--', 'bash', '-c', shell_cmd],
-            ['xfce4-terminal', '-x', 'bash', '-c', shell_cmd],
-            ['xterm', '-e', 'bash', '-c', shell_cmd]
-        ]
-        
+        cmd = "yay -S --noconfirm --needed sunshine moonlight-qt vte4"; sc = f"{cmd}; echo '\nConcluído! Enter para fechar...'; read"
+        terms = [(['konsole', '-e', 'bash', '-c', sc]), (['gnome-terminal', '--', 'bash', '-c', sc]), (['xfce4-terminal', '-x', 'bash', '-c', sc]), (['xterm', '-e', 'bash', '-c', sc])]
         started = False
-        for term_cmd in terminals:
-            if shutil.which(term_cmd[0]):
-                try:
-                    subprocess.Popen(term_cmd)
-                    started = True
-                    break
-                except:
-                    continue
-                    
-        if started:
-            self.status_label.set_text('Instalação rodando em terminal externo. Reinicie o app após concluir.')
-            self.close_btn.set_label('Fechar')
-            self.close_btn.remove_css_class('destructive-action')
-            self.close_btn.add_css_class('suggested-action')
-        else:
-            self.status_label.set_text('Erro: Nenhum terminal detectado.')
-            buffer = self.textview.get_buffer()
-            buffer.set_text(f"Não foi possível abrir terminal.\nExecute manualmente:\n{install_cmd}")
+        for t in terms:
+            if shutil.which(t[0]):
+                try: subprocess.Popen(t); started = True; break
+                except: continue
+        if started: self.status_label.set_text('Rodando em terminal externo. Reinicie após concluir.'); self.close_btn.set_label('Fechar'); self.close_btn.remove_css_class('destructive-action'); self.close_btn.add_css_class('suggested-action')
+        else: self.status_label.set_text('Erro: Nenhum terminal detectado.'); self.textview.get_buffer().set_text(f"Execute manualmente:\n{cmd}")
         
     def start_installation(self):
-        # Command to run
-        cmd = ['yay', '-S', '--noconfirm', '--needed', 'sunshine', 'moonlight-qt']
-        
-        self.status_label.set_text('Executando instalação... (Pode pedir senha de sudo)')
-        
+        self.status_label.set_text('Executando instalação...')
         try:
-            # Create a cancellable
-            cancellable = Gio.Cancellable()
-            
-            def spawn_callback(terminal, pid, error, user_data):
-                if error:
-                    print(f"Spawn error: {error}")
-                    GLib.idle_add(lambda: self.status_label.set_text(f"Erro ao iniciar: {error}"))
-                    GLib.idle_add(self.start_external_installation)
-
-            # Vte spawn_async arguments:
-            # pty_flags, working_directory, argv, envv, spawn_flags, child_setup, timeout, cancellable, callback, user_data
-            self.terminal.spawn_async(
-                Vte.PtyFlags.DEFAULT,
-                None,  # working directory
-                cmd,
-                None,  # env (None = inherit)
-                GLib.SpawnFlags.SEARCH_PATH,
-                None,  # child_setup
-                -1,    # timeout
-                cancellable,
-                spawn_callback,
-                None   # user_data
-            )
-        except Exception as e:
-            print(f"Erro VTE spawn_async: {e}")
-            self.status_label.set_text(f'Erro no terminal integrado: {e}. Tentando externo...')
-            
-            # Fallback to external terminal
-            GLib.idle_add(self.start_external_installation)
+            self.terminal.spawn_async(Vte.PtyFlags.DEFAULT, None, ['yay', '-S', '--noconfirm', '--needed', 'sunshine', 'moonlight-qt'], None, GLib.SpawnFlags.SEARCH_PATH, None, -1, Gio.Cancellable(), lambda t, p, e, u: (GLib.idle_add(lambda: self.status_label.set_text(f"Erro: {e}")) if e else None, GLib.idle_add(self.start_external_installation) if e else None), None)
+        except Exception as e: self.status_label.set_text(f'Erro terminal integrado: {e}. Tentando externo...'); GLib.idle_add(self.start_external_installation)
 
     def on_process_exit(self, terminal, status):
         # status is the exit code

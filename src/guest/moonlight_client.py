@@ -1,242 +1,59 @@
-"""
-Módulo Guest - Gerenciamento do Moonlight
-"""
-
-import subprocess
-import signal
-from typing import Optional, Dict
-
+import subprocess, shutil
 class MoonlightClient:
-    """Gerenciador do cliente Moonlight"""
-    
     def __init__(self):
-        self.process = None
-        self.connected_host = None
-        
-        # Detectar comando moonlight disponível
-        self.moonlight_cmd = self.detect_moonlight()        
-
-    def detect_moonlight(self) -> Optional[str]:
-        """Detecta qual comando Moonlight usar"""
-        import shutil
-        
-        for cmd in ['moonlight-qt', 'moonlight']:
-            if shutil.which(cmd):
-                return cmd
-                
-        return None
-        
-    def connect(self, host_ip: str, **kwargs) -> bool:
-        """
-        Conecta a um host Sunshine
-        
-        Args:
-            host_ip: Endereço IP do host
-            **kwargs: Opções adicionais
-        """
-        if not self.moonlight_cmd:
-            print("Moonlight não está instalado")
-            return False
-            
-        if self.is_connected():
-            print("Já conectado a um host")
-            return False
-            
+        self.process = None; self.connected_host = None
+        self.moonlight_cmd = next((c for c in ['moonlight-qt', 'moonlight'] if shutil.which(c)), None)
+    def connect(self, ip, **kw):
+        if not self.moonlight_cmd or self.is_connected(): return False
         try:
-            # Construir comando
-            # Moonlight QT exige o verbo 'stream' seguido do IP e App
-            cmd = [self.moonlight_cmd, 'stream', host_ip, 'Desktop']
-            
-            # Opções
-            if kwargs.get('width') and kwargs.get('height') and kwargs.get('width') != 'custom':
-                cmd.extend(['--resolution', f"{kwargs['width']}x{kwargs['height']}"])
-                
-            if kwargs.get('fps') and kwargs.get('fps') != 'custom':
-                 cmd.extend(['--fps', str(kwargs['fps'])])
-
-            if kwargs.get('bitrate'):
-                cmd.extend(['--bitrate', str(kwargs['bitrate'])])
-                
-            # Display Mode
-            display_mode = kwargs.get('display_mode', 'borderless')
-            cmd.extend(['--display-mode', display_mode])
-                
-            # Audio
-            # Padrão: Streaming de áudio ativado (toca no cliente, mudo no host)
-            if kwargs.get('audio', True):
-                # Forçar desligar audio no host para garantir streaming
-                cmd.append('--no-audio-on-host')
-            else:
-                # Se desativado, tocar no host (não streamar/tocar no cliente)
-                cmd.append('--audio-on-host')
-
-            print(f"DEBUG: Connecting with options: resolution={kwargs.get('width')}x{kwargs.get('height')}, fps={kwargs.get('fps')}, audio={kwargs.get('audio', True)}")
+            cmd = [self.moonlight_cmd, 'stream', ip, 'Desktop']
+            if kw.get('width') and kw.get('height') and kw.get('width') != 'custom': cmd.extend(['--resolution', f"{kw['width']}x{kw['height']}"])
+            if kw.get('fps') and kw.get('fps') != 'custom': cmd.extend(['--fps', str(kw['fps'])])
+            if kw.get('bitrate'): cmd.extend(['--bitrate', str(kw['bitrate'])])
+            cmd.extend(['--display-mode', kw.get('display_mode', 'borderless')])
+            cmd.append('--no-audio-on-host' if kw.get('audio', True) else '--audio-on-host')
+            if kw.get('hw_decode', True): cmd.extend(['--video-decoder', 'hardware'])
+            else: cmd.extend(['--video-decoder', 'software'])
+            print(f"DEBUG: Connecting with options: resolution={kw.get('width')}x{kw.get('height')}, fps={kw.get('fps')}, audio={kw.get('audio', True)}")
             print(f"DEBUG: Full command: {' '.join(cmd)}")
-            
-            if kwargs.get('hw_decode', True):
-                cmd.extend(['--video-decoder', 'hardware'])
-            else:
-                cmd.extend(['--video-decoder', 'software'])
-                
-            # Iniciar processo
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            self.connected_host = host_ip
-            
-            # Verificar se falhou imediatamente
+            self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.connected_host = ip
             try:
                 exit_code = self.process.wait(timeout=1.0)
-                # Se chegou aqui, falhou
                 stdout, stderr = self.process.communicate()
-                print(f"Moonlight terminou imediatamente (Code {exit_code})")
-                print(f"STDOUT: {stdout}")
-                print(f"STDERR: {stderr}")
+                print(f"Moonlight terminou (Code {exit_code})\nSTDOUT: {stdout}\nSTDERR: {stderr}")
                 return False
-            except subprocess.TimeoutExpired:
-                # Continua rodando
-                pass
-            
-            print(f"Conectado a {host_ip}")
-            return True
-            
-        except Exception as e:
-            print(f"Erro ao conectar: {e}")
-            return False
-            
-    def probe_host(self, host_ip: str) -> bool:
-        """Verifica se o host é acessível e está pareado (usando list)"""
+            except subprocess.TimeoutExpired: pass
+            print(f"Conectado a {ip}"); return True
+        except Exception as e: print(f"Erro ao conectar: {e}"); return False
+    def is_connected(self): return self.process and self.process.poll() is None
+    def disconnect(self):
+        if not self.is_connected(): return False
         try:
-             # Tenta listar apps. Se funcionar, está pareado.
-             # Se falhar, provavelmente precisa parear.
-             # Timeout curto pois pode travar se o host não responder
-             cmd = [self.moonlight_cmd, 'list', host_ip]
-             result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
-             return result.returncode == 0
+            if self.process: self.process.terminate(); self.process.wait(timeout=5)
+            self.process = None; self.connected_host = None; return True
         except:
-             return False
-
-    def pair(self, host_ip: str, on_pin_callback=None) -> bool:
-        """
-        Inicia processo de pareamento.
-        Chama on_pin_callback(pin) quando o PIN for detectado.
-        Bloqueia até parear ou falhar.
-        """
+            if self.process: self.process.kill(); self.process = None; self.connected_host = None
+            return False
+    def probe_host(self, host_ip):
+        try: return subprocess.run([self.moonlight_cmd, 'list', host_ip], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2).returncode == 0
+        except: return False
+    def pair(self, host_ip, on_pin_callback=None):
         try:
-            cmd = [self.moonlight_cmd, 'pair', host_ip]
-            # Precisamos ler stdout em tempo real
-            process = subprocess.Popen(
-                cmd, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.STDOUT, 
-                text=True, 
-                bufsize=1
-            )
-            
-            pin_found = False
-            
-            while process.poll() is None:
-                line = process.stdout.readline()
-                if not line:
-                    break
-                    
-                print(f"PAIR: {line.strip()}") # Debug
-                
-                # Detectar PIN
-                # Ex: "Please enter the following PIN on the target PC: 1234"
+            p = subprocess.Popen([self.moonlight_cmd, 'pair', host_ip], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            while p.poll() is None:
+                line = p.stdout.readline()
+                if not line: break
                 if "PIN" in line and "target PC" in line:
-                    parts = line.strip().split()
-                    if parts:
-                        pin = parts[-1]
-                        # Remover pontuação se houver
-                        pin = ''.join(filter(str.isdigit, pin))
-                        if pin and on_pin_callback:
-                            on_pin_callback(pin)
-                            pin_found = True
-                            
-                # Detectar sucesso
-                if "successfully paired" in line.lower() or "already paired" in line.lower():
-                    process.terminate()
-                    return True
-                    
-            return process.returncode == 0
-            
-        except Exception as e:
-            print(f"Erro no pareamento: {e}")
-            return False
-
-    def disconnect(self) -> bool:
-        """Desconecta do host"""
-        if not self.is_connected():
-            return False
-            
+                    pin = ''.join(filter(str.isdigit, line.strip().split()[-1]))
+                    if pin and on_pin_callback: on_pin_callback(pin)
+                if "successfully paired" in line.lower() or "already paired" in line.lower(): p.terminate(); return True
+            return p.returncode == 0
+        except: return False
+    def list_apps(self, host_ip):
+        if not self.moonlight_cmd: return []
         try:
-            if self.process:
-                self.process.terminate()
-                self.process.wait(timeout=5)
-                
-            self.process = None
-            self.connected_host = None
-            print("Desconectado")
-            return True
-            
-        except Exception as e:
-            print(f"Erro ao desconectar: {e}")
-            # Forçar kill
-            try:
-                if self.process:
-                    self.process.kill()
-                    self.process = None
-                    self.connected_host = None
-            except:
-                pass
-            return False
-            
-    def is_connected(self) -> bool:
-        """Verifica se está conectado"""
-        if self.process and self.process.poll() is None:
-            return True
-        return False
-        
-    def get_status(self) -> Dict:
-        """Obtém status da conexão"""
-        return {
-            'connected': self.is_connected(),
-            'host': self.connected_host,
-            'moonlight_cmd': self.moonlight_cmd,
-        }
-        
-    def list_apps(self, host_ip: str) -> list:
-        """
-        Lista aplicativos disponíveis no host
-        
-        Args:
-            host_ip: Endereço IP do host
-        """
-        if not self.moonlight_cmd:
-            return []
-            
-        try:
-            result = subprocess.run(
-                [self.moonlight_cmd, 'list', host_ip],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                # Parse output
-                apps = []
-                for line in result.stdout.splitlines():
-                    if line.strip():
-                        apps.append(line.strip())
-                return apps
-            else:
-                return []
-                
-        except Exception as e:
-            print(f"Erro ao listar apps: {e}")
-            return []
+            r = subprocess.run([self.moonlight_cmd, 'list', host_ip], capture_output=True, text=True, timeout=5)
+            return [l.strip() for l in r.stdout.splitlines() if l.strip()] if r.returncode == 0 else []
+        except: return []
+    def get_status(self): return {'connected': self.is_connected(), 'host': self.connected_host, 'moonlight_cmd': self.moonlight_cmd}

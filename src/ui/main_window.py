@@ -1,15 +1,7 @@
-"""
-Janela principal do Big Remote Play Together
-Interface moderna com navegação lateral seguindo padrões Adwaita
-"""
-
 import gi
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-
+gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gio
 import threading
-
 from .host_view import HostView
 from .guest_view import GuestView
 from .installer_window import InstallerWindow
@@ -57,99 +49,31 @@ class MainWindow(Adw.ApplicationWindow):
         self.connect('close-request', self.on_close_request)
         
     def on_close_request(self, window):
-        """Chamado ao fechar a janela"""
         try:
-            if hasattr(self, 'host_view'):
-                self.host_view.cleanup()
-            
-            if hasattr(self, 'guest_view'):
-                self.guest_view.cleanup()
-                
-            print("Recursos limpos com sucesso.")
-        except Exception as e:
-            print(f"Erro ao limpar recursos: {e}")
-            
+            if hasattr(self, 'host_view'): self.host_view.cleanup()
+            if hasattr(self, 'guest_view'): self.guest_view.cleanup()
+        except: pass
         return False
         
     def setup_ui(self):
-        """Configura interface moderna com NavigationSplitView"""
-        # Toast overlay para notificações
-        self.toast_overlay = Adw.ToastOverlay()
-        self.set_content(self.toast_overlay)
-        
-        # NavigationSplitView - layout moderno com sidebar
-        self.split_view = Adw.NavigationSplitView()
-        self.toast_overlay.set_child(self.split_view)
-        
-        # === SIDEBAR ===
-        self.setup_sidebar()
-        
-        # === CONTENT ===
-        self.setup_content()
-        
-        # Configurar split view
-        self.split_view.set_min_sidebar_width(220)
-        self.split_view.set_max_sidebar_width(280)
+        self.toast_overlay = Adw.ToastOverlay(); self.set_content(self.toast_overlay)
+        self.split_view = Adw.NavigationSplitView(); self.toast_overlay.set_child(self.split_view)
+        self.setup_sidebar(); self.setup_content()
+        self.split_view.set_min_sidebar_width(220); self.split_view.set_max_sidebar_width(280)
         
     def setup_sidebar(self):
-        """Configura sidebar de navegação"""
-        sidebar_toolbar = Adw.ToolbarView()
-        
-        # Header da sidebar
-        sidebar_header = Adw.HeaderBar()
-        
-        # Ícone do app (clicável para About)
-        app_icon_btn = Gtk.Button()
-        app_icon_btn.add_css_class('flat')
-        app_icon = Gtk.Image.new_from_icon_name('big-remote-play-together')
-        app_icon.set_pixel_size(20)
-        app_icon_btn.set_child(app_icon)
-        app_icon_btn.set_tooltip_text('Sobre Big Remote Play Together')
-        app_icon_btn.connect('clicked', lambda btn: self.get_application().activate_action('about', None))
-        sidebar_header.pack_start(app_icon_btn)
-        
-        # Título da sidebar
-        sidebar_title = Adw.WindowTitle.new('Remote Play', '')
-        sidebar_header.set_title_widget(sidebar_title)
-        
-        sidebar_toolbar.add_top_bar(sidebar_header)
-        
-        # Container principal da sidebar (lista + status)
-        sidebar_main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        sidebar_main.set_vexpand(True)
-        
-        # Lista de navegação
-        sidebar_scroll = Gtk.ScrolledWindow()
-        sidebar_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        sidebar_scroll.set_vexpand(True)
-        
-        self.nav_list = Gtk.ListBox()
-        self.nav_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self.nav_list.add_css_class('navigation-sidebar')
+        tb = Adw.ToolbarView(); hb = Adw.HeaderBar()
+        btn = Gtk.Button(icon_name='big-remote-play-together'); btn.add_css_class('flat')
+        btn.connect('clicked', lambda b: self.get_application().activate_action('about', None))
+        hb.pack_start(btn); hb.set_title_widget(Adw.WindowTitle.new('Remote Play', ''))
+        tb.add_top_bar(hb); main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); main.set_vexpand(True)
+        scroll = Gtk.ScrolledWindow(); scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC); scroll.set_vexpand(True)
+        self.nav_list = Gtk.ListBox(); self.nav_list.add_css_class('navigation-sidebar')
         self.nav_list.connect('row-selected', self.on_nav_selected)
-        
-        # Adicionar páginas de navegação
-        for page_id, page_info in NAVIGATION_PAGES.items():
-            row = self.create_nav_row(page_id, page_info)
-            self.nav_list.append(row)
-        
-        # Selecionar primeira página
-        first_row = self.nav_list.get_row_at_index(0)
-        if first_row:
-            self.nav_list.select_row(first_row)
-        
-        sidebar_scroll.set_child(self.nav_list)
-        sidebar_main.append(sidebar_scroll)
-        
-        # Status box na parte inferior
-        self.status_footer = self.create_status_footer()
-        sidebar_main.append(self.status_footer)
-        
-        sidebar_toolbar.set_content(sidebar_main)
-        
-        # Criar página de navegação da sidebar
-        sidebar_page = Adw.NavigationPage.new(sidebar_toolbar, 'Navigation')
-        self.split_view.set_sidebar(sidebar_page)
+        for pid, info in NAVIGATION_PAGES.items(): self.nav_list.append(self.create_nav_row(pid, info))
+        if r := self.nav_list.get_row_at_index(0): self.nav_list.select_row(r)
+        scroll.set_child(self.nav_list); main.append(scroll); main.append(self.create_status_footer())
+        tb.set_content(main); self.split_view.set_sidebar(Adw.NavigationPage.new(tb, 'Navigation'))
         
     def create_nav_row(self, page_id: str, page_info: dict) -> Gtk.ListBoxRow:
         """Cria linha de navegação na sidebar"""
@@ -239,318 +163,80 @@ class MainWindow(Adw.ApplicationWindow):
         
         return footer
         
-    def update_server_status(self, has_sunshine: bool, has_moonlight: bool):
-        """Atualiza indicadores de status dos servidores"""
-        # Atualizar Sunshine
-        if has_sunshine:
-            self.sunshine_dot.remove_css_class('status-offline')
-            self.sunshine_dot.add_css_class('status-online')
-        else:
-            self.sunshine_dot.remove_css_class('status-online')
-            self.sunshine_dot.add_css_class('status-offline')
-        
-        # Atualizar Moonlight
-        if has_moonlight:
-            self.moonlight_dot.remove_css_class('status-offline')
-            self.moonlight_dot.add_css_class('status-online')
-        else:
-            self.moonlight_dot.remove_css_class('status-online')
-            self.moonlight_dot.add_css_class('status-offline')
+    def update_server_status(self, has_sun, has_moon):
+        for dot, has in [(self.sunshine_dot, has_sun), (self.moonlight_dot, has_moon)]:
+            dot.remove_css_class('status-online' if not has else 'status-offline')
+            dot.add_css_class('status-online' if has else 'status-offline')
 
-    def update_dependency_ui(self, has_sunshine: bool, has_moonlight: bool):
-        """Atualiza UI de dependências e bloqueia botões se necessário"""
-        # Sunshine
-        if has_sunshine:
-            self.lbl_sunshine_status.set_markup('Sunshine - <span color="#2ec27e">Instalado</span>')
-            self.host_card.set_sensitive(True)
-            self.host_card.set_tooltip_text('')
-        else:
-            self.lbl_sunshine_status.set_markup('Sunshine - <span color="#e01b24">Falta Instalar</span>')
-            self.host_card.set_sensitive(False)
-            self.host_card.set_tooltip_text('Necessário instalar Sunshine para hospedar')
-
-        # Moonlight
-        if has_moonlight:
-            self.lbl_moonlight_status.set_markup('Moonlight - <span color="#2ec27e">Instalado</span>')
-            self.guest_card.set_sensitive(True)
-            self.guest_card.set_tooltip_text('')
-        else:
-            self.lbl_moonlight_status.set_markup('Moonlight - <span color="#e01b24">Falta Instalar</span>')
-            self.guest_card.set_sensitive(False)
-            self.guest_card.set_tooltip_text('Necessário instalar Moonlight para conectar')
+    def update_dependency_ui(self, has_sun, has_moon):
+        for lbl, card, has, name in [(self.lbl_sunshine_status, self.host_card, has_sun, 'Sunshine'), (self.lbl_moonlight_status, self.guest_card, has_moon, 'Moonlight')]:
+            lbl.set_markup(f'{name} - <span color="{"#2ec27e" if has else "#e01b24"}">{"Instalado" if has else "Falta Instalar"}</span>')
+            card.set_sensitive(has); card.set_tooltip_text('' if has else f'Necessário instalar {name} para {"hospedar" if name=="Sunshine" else "conectar"}')
 
         
     def setup_content(self):
-        """Configura área de conteúdo"""
-        content_toolbar = Adw.ToolbarView()
-        
-        # Header do conteúdo
-        content_header = Adw.HeaderBar()
-        
-        # Menu button
-        menu = Gio.Menu()
-        menu.append('Preferências', 'app.preferences')
-        menu.append('Sobre', 'app.about')
-        menu_btn = Gtk.MenuButton(icon_name='open-menu-symbolic', menu_model=menu)
-        content_header.pack_end(menu_btn)
-        
-        content_toolbar.add_top_bar(content_header)
-        
-        # Stack para as páginas
-        self.content_stack = Gtk.Stack()
-        self.content_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        self.content_stack.set_transition_duration(200)
-        self.content_stack.set_vexpand(True)
-        
-        # Criar páginas
+        ct = Adw.ToolbarView(); hb = Adw.HeaderBar(); m = Gio.Menu()
+        m.append('Preferências', 'app.preferences'); m.append('Sobre', 'app.about')
+        hb.pack_end(Gtk.MenuButton(icon_name='open-menu-symbolic', menu_model=m))
+        ct.add_top_bar(hb); self.content_stack = Gtk.Stack()
+        self.content_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE); self.content_stack.set_transition_duration(200)
         self.content_stack.add_named(self.create_welcome_page(), 'welcome')
-        
-        self.host_view = HostView()
-        self.content_stack.add_named(self.host_view, 'host')
-        
-        self.guest_view = GuestView()
-        self.content_stack.add_named(self.guest_view, 'guest')
-        
-        content_toolbar.set_content(self.content_stack)
-        
-        # Criar página de navegação do conteúdo
-        content_page = Adw.NavigationPage.new(content_toolbar, 'Big Remote Play Together')
-        self.split_view.set_content(content_page)
+        self.host_view = HostView(); self.content_stack.add_named(self.host_view, 'host')
+        self.guest_view = GuestView(); self.content_stack.add_named(self.guest_view, 'guest')
+        ct.set_content(self.content_stack); self.split_view.set_content(Adw.NavigationPage.new(ct, 'Big Remote Play Together'))
         
     def create_welcome_page(self):
-        """Cria página de boas-vindas moderna"""
-        # ScrolledWindow para conteúdo
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_vexpand(True)
+        scroll = Gtk.ScrolledWindow(); scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC); scroll.set_vexpand(True)
+        sp = Adw.StatusPage(icon_name='big-remote-play-together', title='Big Remote Play Together', description='Jogue cooperativamente através da rede local\nCompartilhe seus jogos ou conecte-se a um servidor')
+        cb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=32); cb.set_halign(Gtk.Align.CENTER); cb.set_margin_bottom(24)
+        db = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8); db.set_halign(Gtk.Align.CENTER); db.append(Gtk.Label(label='Dependências', css_classes=['heading', 'dim-label']))
+        self.lbl_sunshine_status = Gtk.Label(label='Sunshine - Verificando...'); self.lbl_moonlight_status = Gtk.Label(label='Moonlight - Verificando...')
+        for l in [self.lbl_sunshine_status, self.lbl_moonlight_status]: db.append(l)
+        cb.append(db); cards = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24); cards.set_halign(Gtk.Align.CENTER)
+        self.host_card = self.create_action_card('Hospedar Servidor', 'Compartilhe seus jogos com outros jogadores na rede', 'network-server-symbolic', 'suggested-action', lambda: self.navigate_to('host'))
+        self.guest_card = self.create_action_card('Conectar Servidor', 'Conecte-se a um servidor de jogos na rede', 'network-workgroup-symbolic', '', lambda: self.navigate_to('guest'))
+        for c in [self.host_card, self.guest_card]: cards.append(c)
+        cb.append(cards); il = Gtk.Label(); il.set_markup('<span size="small">Baseado em <b>Sunshine</b> e <b>Moonlight</b></span>'); il.add_css_class('dim-label')
+        cb.append(il); sp.set_child(cb); scroll.set_child(sp); return scroll
         
-        # Status page
-        status_page = Adw.StatusPage()
-        status_page.set_icon_name('big-remote-play-together')
-        status_page.set_title('Big Remote Play Together')
-        status_page.set_description(
-            'Jogue cooperativamente através da rede local\n'
-            'Compartilhe seus jogos ou conecte-se a um servidor'
-        )
-        scroll.set_child(status_page)
+    def create_action_card(self, title, desc, icon, cls, cb):
+        clamp = Adw.Clamp(); clamp.set_maximum_size(320); btn = Gtk.Button(); btn.add_css_class('card')
+        if cls: btn.add_css_class(cls)
+        btn.set_size_request(300, 180); btn.connect('clicked', lambda b: cb())
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        for m in ['top', 'bottom', 'start', 'end']: getattr(box, f'set_margin_{m}')(24)
+        img = Gtk.Image.new_from_icon_name(icon); img.set_pixel_size(48); img.add_css_class('accent'); box.append(img)
+        tl = Gtk.Label(label=title, css_classes=['title-3'], wrap=True, justify=Gtk.Justification.CENTER); box.append(tl)
+        dl = Gtk.Label(label=desc, css_classes=['caption', 'dim-label'], wrap=True, justify=Gtk.Justification.CENTER, max_width_chars=35); box.append(dl)
+        btn.set_child(box); clamp.set_child(btn); return clamp
         
-        # Box para conteúdo extra (Dependências, Cards, Info)
-        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=32)
-        content_box.set_halign(Gtk.Align.CENTER)
-        content_box.set_margin_bottom(24)
-        
-        # Dependency check section
-        dep_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        dep_box.set_halign(Gtk.Align.CENTER)
-        
-        # Title Dependencies
-        dep_title = Gtk.Label(label='Dependências')
-        dep_title.add_css_class('heading')
-        dep_title.add_css_class('dim-label')
-        dep_box.append(dep_title)
-        
-        # Sunshine Status
-        self.lbl_sunshine_status = Gtk.Label(label='Sunshine - Verificando...')
-        dep_box.append(self.lbl_sunshine_status)
-        
-        # Moonlight Status
-        self.lbl_moonlight_status = Gtk.Label(label='Moonlight - Verificando...')
-        dep_box.append(self.lbl_moonlight_status)
-        
-        content_box.append(dep_box)
-        
-        # Cards de ação
-        cards_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
-        cards_box.set_halign(Gtk.Align.CENTER)
-        
-        # Card Hospedar
-        self.host_card = self.create_action_card(
-            'Hospedar Servidor',
-            'Compartilhe seus jogos com outros jogadores na rede',
-            'network-server-symbolic',
-            'suggested-action',
-            lambda: self.navigate_to('host')
-        )
-        cards_box.append(self.host_card)
-        
-        # Card Conectar
-        self.guest_card = self.create_action_card(
-            'Conectar Servidor',
-            'Conecte-se a um servidor de jogos na rede',
-            'network-workgroup-symbolic',
-            '',
-            lambda: self.navigate_to('guest')
-        )
-        cards_box.append(self.guest_card)
-        
-        content_box.append(cards_box)
-        
-        # Informações adicionais
-        info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        info_box.set_halign(Gtk.Align.CENTER)
-        
-        info_label = Gtk.Label()
-        info_label.set_markup(
-            '<span size="small">Baseado em <b>Sunshine</b> e <b>Moonlight</b></span>'
-        )
-        info_label.add_css_class('dim-label')
-        info_box.append(info_label)
-        
-        content_box.append(info_box)
-        
-        # Definir conteúdo da status page
-        status_page.set_child(content_box)
-        
-        return scroll
-        
-    def create_action_card(self, title: str, description: str, icon: str, 
-                          css_class: str, callback) -> Gtk.Widget:
-        """Cria card de ação moderna"""
-        # Card usando Adwaita Clamp
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(320)
-        
-        # Button como card
-        card_btn = Gtk.Button()
-        card_btn.add_css_class('card')
-        if css_class:
-            card_btn.add_css_class(css_class)
-        card_btn.set_size_request(300, 180)
-        card_btn.connect('clicked', lambda b: callback())
-        
-        # Conteúdo do card
-        card_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        card_box.set_margin_start(24)
-        card_box.set_margin_end(24)
-        card_box.set_margin_top(24)
-        card_box.set_margin_bottom(24)
-        
-        # Ícone
-        icon_widget = Gtk.Image.new_from_icon_name(icon)
-        icon_widget.set_pixel_size(48)
-        icon_widget.add_css_class('accent')
-        card_box.append(icon_widget)
-        
-        # Título
-        title_label = Gtk.Label(label=title)
-        title_label.add_css_class('title-3')
-        title_label.set_wrap(True)
-        title_label.set_justify(Gtk.Justification.CENTER)
-        card_box.append(title_label)
-        
-        # Descrição
-        desc_label = Gtk.Label(label=description)
-        desc_label.add_css_class('caption')
-        desc_label.add_css_class('dim-label')
-        desc_label.set_wrap(True)
-        desc_label.set_justify(Gtk.Justification.CENTER)
-        desc_label.set_max_width_chars(35)
-        card_box.append(desc_label)
-        
-        card_btn.set_child(card_box)
-        clamp.set_child(card_btn)
-        
-        return clamp
-        
-    def on_nav_selected(self, listbox, row):
-        """Navega para a página selecionada"""
-        if row is None:
-            return
-        
-        # Verificar se content_stack já foi criado
-        if not hasattr(self, 'content_stack'):
-            return
-            
-        # Atualizar CSS das categorias
-        current = self.nav_list.get_first_child()
-        while current:
-            current.remove_css_class('active-category')
-            current = current.get_next_sibling()
-        
-        row.add_css_class('active-category')
-        
-        # Navegar para a página
-        self.navigate_to(row.page_id)
-        
-    def navigate_to(self, page_id: str):
-        """Navega para uma página específica"""
-        self.current_page = page_id
-        self.content_stack.set_visible_child_name(page_id)
-        
-        # Atualizar seleção na sidebar
-        row = self.nav_list.get_first_child()
-        while row:
-            if hasattr(row, 'page_id') and row.page_id == page_id:
-                self.nav_list.select_row(row)
-                break
-            row = row.get_next_sibling()
+    def on_nav_selected(self, lb, row):
+        if not row or not hasattr(self, 'content_stack'): return
+        c = self.nav_list.get_first_child()
+        while c: (c.remove_css_class('active-category'), setattr(c, 'active', False), c := c.get_next_sibling())
+        row.add_css_class('active-category'); self.navigate_to(row.page_id)
+    def navigate_to(self, pid):
+        self.current_page = pid; self.content_stack.set_visible_child_name(pid)
+        r = self.nav_list.get_first_child()
+        while r:
+            if getattr(r, 'page_id', None) == pid: self.nav_list.select_row(r); break
+            r = r.get_next_sibling()
         
     def check_system(self):
-        """Verifica componentes do sistema"""
         def check():
-            # Verificar se estão instalados
-            has_sunshine = self.system_check.has_sunshine()
-            has_moonlight = self.system_check.has_moonlight()
-            
-            # Verificar se estão rodando
-            sunshine_running = self.system_check.is_sunshine_running()
-            moonlight_running = self.system_check.is_moonlight_running()
-            
-            GLib.idle_add(self.update_status, has_sunshine, has_moonlight)
-            GLib.idle_add(self.update_server_status, sunshine_running, moonlight_running)
-            GLib.idle_add(self.update_dependency_ui, has_sunshine, has_moonlight)
-            
-        thread = threading.Thread(target=check, daemon=True)
-        thread.start()
-        
-        # Verificar periodicamente (a cada 3 segundos)
-        GLib.timeout_add_seconds(3, self.periodic_status_check)
-    
-    def periodic_status_check(self):
-        """Verificação periódica do status dos servidores"""
-        def check():
-            sunshine_running = self.system_check.is_sunshine_running()
-            moonlight_running = self.system_check.is_moonlight_running()
-            GLib.idle_add(self.update_server_status, sunshine_running, moonlight_running)
-        
-        thread = threading.Thread(target=check, daemon=True)
-        thread.start()
-        
-        return True  # Continuar verificando
+            h_sun, h_moon = self.system_check.has_sunshine(), self.system_check.has_moonlight()
+            r_sun, r_moon = self.system_check.is_sunshine_running(), self.system_check.is_moonlight_running()
+            GLib.idle_add(lambda: (self.update_status(h_sun, h_moon), self.update_server_status(r_sun, r_moon), self.update_dependency_ui(h_sun, h_moon)))
+        threading.Thread(target=check, daemon=True).start()
+        GLib.timeout_add_seconds(3, self.p_check)
+    def p_check(self):
+        threading.Thread(target=lambda: GLib.idle_add(self.update_server_status, self.system_check.is_sunshine_running(), self.system_check.is_moonlight_running()), daemon=True).start()
+        return True
 
         
-    def update_status(self, has_sunshine, has_moonlight):
-        """Verifica status de instalação e mostra diálogo se necessário"""
-        # Apenas mostrar diálogo se nenhum componente estiver instalado
-        if not has_sunshine and not has_moonlight:
-            self.show_missing_components_dialog()
-            
-    def show_missing_components_dialog(self):
-        """Mostra diálogo de componentes faltando"""
-        dialog = Adw.MessageDialog.new(self)
-        dialog.set_heading('Componentes Necessários Não Encontrados')
-        dialog.set_body(
-            'O Big Remote Play Together requer:\n\n'
-            '• Sunshine (para hospedar jogos)\n'
-            '• Moonlight (para conectar)\n\n'
-            'Deseja instalar agora?'
-        )
-        
-        dialog.add_response('cancel', 'Cancelar')
-        dialog.add_response('install', 'Instalar')
-        dialog.set_response_appearance('install', Adw.ResponseAppearance.SUGGESTED)
-        
-        dialog.connect('response', self.on_install_components)
-        dialog.present()
-        
-    def on_install_components(self, dialog, response):
-        """Instala componentes faltando"""
-        if response == 'install':
-            installer = InstallerWindow(parent=self, on_success=self.check_system)
-            installer.present()
-    
-    def show_toast(self, message):
-        """Mostra toast notification"""
-        toast = Adw.Toast.new(message)
-        toast.set_timeout(3)
-        self.toast_overlay.add_toast(toast)
+    def update_status(self, h_sun, h_moon): (self.show_missing_dialog() if not h_sun and not h_moon else None)
+    def show_missing_dialog(self):
+        d = Adw.MessageDialog.new(self); d.set_heading('Componentes Faltando'); d.set_body('Sunshine e Moonlight são necessários. Instalar agora?')
+        d.add_response('cancel', 'Cancelar'); d.add_response('install', 'Instalar'); d.set_response_appearance('install', Adw.ResponseAppearance.SUGGESTED)
+        d.connect('response', lambda dlg, r: (InstallerWindow(parent=self, on_success=self.check_system).present() if r == 'install' else None)); d.present()
+    def show_toast(self, m): (self.toast_overlay.add_toast(Adw.Toast.new(m)) if hasattr(self, 'toast_overlay') else print(m))

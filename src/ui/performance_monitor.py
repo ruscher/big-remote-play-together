@@ -201,43 +201,13 @@ class PerformanceChartWidget(Gtk.DrawingArea):
         if self._hover_index is not None and 0 <= self._hover_index < len(self._history):
             self._draw_tooltip(cr, width, height, margin_left, margin_top, chart_width, chart_height)
 
-    def _draw_line(self, cr, w, h, mx, my, values, color):
-        if not values: return
-        
-        cr.set_source_rgba(*color)
-        cr.set_line_width(2)
-        
-        num = len(values)
-        x_step = w / max(CHART_MAX_HISTORY - 1, 1)
-        start_x = mx + w - (num - 1) * x_step
-        
-        for i, val in enumerate(values):
-            x = start_x + i * x_step
-            # Invert Y because 0 is top
-            # Normalized val 1.0 = Max value (Top of chart)
-            # Cairo Y: 0 is top. So 1.0 val should be at my. 0.0 val at my + h.
-            y = my + h * (1 - val)
-            if i == 0:
-                cr.move_to(x, y)
-            else:
-                cr.line_to(x, y)
-        
-        cr.stroke()
-        
-        # Fill area
-        cr.set_source_rgba(color[0], color[1], color[2], 0.15)
-        for i, val in enumerate(values):
-            x = start_x + i * x_step
-            y = my + h * (1 - val)
-            if i == 0:
-                cr.move_to(x, y)
-            else:
-                cr.line_to(x, y)
-        
-        cr.line_to(start_x + (num - 1) * x_step, my + h)
-        cr.line_to(start_x, my + h)
-        cr.close_path()
-        cr.fill()
+    def _draw_line(self, cr, w, h, mx, my, vals, color):
+        if not vals: return
+        cr.set_source_rgba(*color); cr.set_line_width(2); x_step = w / max(CHART_MAX_HISTORY - 1, 1); sx = mx + w - (len(vals) - 1) * x_step
+        for i, v in enumerate(vals): (cr.line_to if i else cr.move_to)(sx + i * x_step, my + h * (1 - v))
+        cr.stroke(); cr.set_source_rgba(color[0], color[1], color[2], 0.15)
+        for i, v in enumerate(vals): (cr.line_to if i else cr.move_to)(sx + i * x_step, my + h * (1 - v))
+        cr.line_to(sx + (len(vals) - 1) * x_step, my + h); cr.line_to(sx, my + h); cr.close_path(); cr.fill()
 
     def _draw_legend(self, cr, w, h, margin_left):
         legend_y = h - 10
@@ -346,32 +316,11 @@ class PerformanceMonitor(Gtk.Box):
         self.update_timer = None
 
     def start_monitoring(self):
-        if self.update_timer: return
-        
-        def update():
-            # TODO: Obter dados reais. Por enquanto simulamos.
-            l = random.uniform(5, 50)
-            f = random.uniform(58, 62)
-            b = random.uniform(10, 40)
-            self.chart.add_data_point(l, f, b)
-            return True
-            
-        self.update_timer = GLib.timeout_add(1000, update)
-        
-    def stop_monitoring(self):
-        if self.update_timer:
-            GLib.source_remove(self.update_timer)
-            self.update_timer = None
-
-    def set_connection_status(self, host_name, status_text, is_connected=True):
-        """Atualiza informações de conexão no cabeçalho"""
-        if is_connected:
-            self._title_label.set_label(f"Conectado a {host_name}")
-            self._status_label.set_label(status_text)
-            self._status_icon.set_from_icon_name("network-transmit-receive-symbolic")
-            self._status_icon.add_css_class("success")
-        else:
-            self._title_label.set_label("Monitoramento em Tempo Real")
-            self._status_label.set_label("Desconectado")
-            self._status_icon.set_from_icon_name("network-idle-symbolic")
-            self._status_icon.remove_css_class("success")
+        if not self.update_timer: self.update_timer = GLib.timeout_add(1000, lambda: (self.chart.add_data_point(random.uniform(5,50), random.uniform(58,62), random.uniform(10,40)), True)[1])
+    def stop_monitoring(self): (GLib.source_remove(self.update_timer) if self.update_timer else None); self.update_timer = None
+    def set_connection_status(self, name, status, conn=True):
+        self._title_label.set_label(f"Conectado a {name}" if conn else "Monitoramento Real")
+        self._status_label.set_label(status if conn else "Desconectado")
+        self._status_icon.set_from_icon_name("network-transmit-receive-symbolic" if conn else "network-idle-symbolic")
+        if conn: self._status_icon.add_css_class("success")
+        else: self._status_icon.remove_css_class("success")
