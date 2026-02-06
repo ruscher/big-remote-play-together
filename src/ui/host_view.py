@@ -304,8 +304,8 @@ class HostView(Gtk.Box):
         # Se detectar que o Sunshine roubou o foco para o sink virtual dele
         if current and 'sink-sunshine-stereo' in current:
             self.audio_hijack_counter += 1
-            if self.audio_hijack_counter >= 15:
-                # Se persistir por 15 segundos, força a volta para o original
+            if self.audio_hijack_counter >= 5:
+                # Se persistir por 5 segundos, força a volta para o original
                 self.audio_manager.set_default_sink(self.audio_manager.original_sink)
                 self.show_toast(f"Áudio restaurado: {self.audio_manager.original_sink}")
                 self.audio_hijack_counter = 0 
