@@ -411,9 +411,6 @@ class HostView(Gtk.Box):
                     
         dialog.connect("response", on_create)
         dialog.present()
-                
-        dialog.connect("response", on_response)
-        dialog.present()
         
     def open_sunshine_auth_dialog(self, pin_to_retry: str):
         dialog = Adw.MessageDialog(heading="Autenticação Sunshine", body="O Sunshine requer login. Digite suas credenciais (padrão: admin / senha criada na instalação).")
