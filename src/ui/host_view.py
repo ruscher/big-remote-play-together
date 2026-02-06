@@ -363,15 +363,16 @@ class HostView(Gtk.Box):
         dialog.present()
         
     def prompt_create_user(self, pin_retry):
-        dialog = Adw.MessageDialog(heading="Usuário Não Encontrado", body="Nenhum usuário e senha foi criado para autenticar no Sunshine. Deseja criar agora?")
+        dialog = Adw.MessageDialog(heading="Usuário Não Encontrado", body="Nenhum usuário foi criado no Sunshine. É necessário configurar um usuário pelo navegador.")
         dialog.set_transient_for(self.get_root())
         dialog.add_response("cancel", "Cancelar")
-        dialog.add_response("create", "Criar")
-        dialog.set_response_appearance("create", Adw.ResponseAppearance.SUGGESTED)
+        dialog.add_response("open", "Abrir Configuração")
+        dialog.set_response_appearance("open", Adw.ResponseAppearance.SUGGESTED)
         
         def on_resp(d, r):
-            if r == "create":
-                self.open_create_user_dialog(pin_retry)
+            if r == "open":
+                import webbrowser
+                webbrowser.open("https://localhost:47990")
         
         dialog.connect("response", on_resp)
         dialog.present()
