@@ -91,7 +91,7 @@ class AudioManager:
             ], check=True)
             
             # 2. Pequeno delay e garantir volumes do Null Sink
-            import time; time.sleep(0.2)
+            import time; time.sleep(0.5)
             subprocess.run(['pactl', 'set-sink-mute', 'SunshineGameSink', '0'], check=False)
             subprocess.run(['pactl', 'set-sink-volume', 'SunshineGameSink', '100%'], check=False)
 
@@ -112,8 +112,18 @@ class AudioManager:
             print(f"Loopback criado com ID: {loop_id}")
             
             # 5. Definir SunshineGameSink como padrão (opcional, mas bom pra jogos novos irem pra ele)
+            # 5. Definir SunshineGameSink como padrão (opcional, mas bom pra jogos novos irem pra ele)
             self.set_default_sink("SunshineGameSink")
-            
+
+            # 6. Verify creation
+            time.sleep(0.5)
+            sinks = subprocess.run(['pactl', 'list', 'short', 'sinks'], capture_output=True, text=True).stdout
+            if 'SunshineGameSink' not in sinks:
+                print("ERRO CRÍTICO: SunshineGameSink não foi criado após comando!")
+                self.disable_streaming_audio(host_sink)
+                return False
+                
+            print("Áudio Streaming habilitado e verificado com sucesso.")
             return True
             
         except Exception as e:

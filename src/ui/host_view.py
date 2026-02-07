@@ -764,10 +764,10 @@ class HostView(Gtk.Box):
                 if self.audio_manager:
                     # Returns True if success
                     if self.audio_manager.enable_streaming_audio(host_sink):
-                        # Point Sunshine to the monitor of the Null Sink part of our setup
-                        # The null sink is named "SunshineStereo" in audio.py
-                        monitor_src = "SunshineGameSink.monitor"
-                        sunshine_config['audio_sink'] = monitor_src
+                        # Dynamically get monitor source name
+                        monitor_src = self.audio_manager.get_sink_monitor_source("SunshineGameSink")
+                        sunshine_config['audio_sink'] = monitor_src if monitor_src else "SunshineGameSink.monitor"
+                        print(f"DEBUG: Configured Sunshine audio_sink to: {sunshine_config['audio_sink']}")
                         
                         # Start Mixer UI updates
                         self.start_audio_mixer_refresh()
@@ -777,6 +777,8 @@ class HostView(Gtk.Box):
                         GLib.timeout_add(5000, lambda: (self.audio_manager.set_default_sink(host_sink), self.show_toast(f"Padrão restaurado: {host_sink}"))[1])
                     else:
                          print("Failed to enable streaming sinks, falling back to default")
+                         self.show_toast("Falha ao criar Áudio Virtual")
+                         self.audio_manager.disable_streaming_audio(None)
             else:
                 sunshine_config['audio'] = 'none' # Disable audio streaming per requirement
                 if self.audio_manager:

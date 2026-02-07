@@ -11,7 +11,7 @@ class MoonlightClient:
             if kw.get('fps') and kw.get('fps') != 'custom': cmd.extend(['--fps', str(kw['fps'])])
             if kw.get('bitrate'): cmd.extend(['--bitrate', str(kw['bitrate'])])
             cmd.extend(['--display-mode', kw.get('display_mode', 'borderless')])
-            cmd.append('--no-audio-on-host' if kw.get('audio', True) else '--audio-on-host')
+            if not kw.get('audio', True): cmd.append('--audio-on-host')
             if kw.get('hw_decode', True): cmd.extend(['--video-decoder', 'hardware'])
             else: cmd.extend(['--video-decoder', 'software'])
             print(f"DEBUG: Connecting with options: resolution={kw.get('width')}x{kw.get('height')}, fps={kw.get('fps')}, audio={kw.get('audio', True)}")

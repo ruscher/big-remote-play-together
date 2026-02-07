@@ -39,10 +39,15 @@ class SunshineHost:
                 str(config_file)
             ]
             
-            # Iniciar processo em uma nova sessão para facilitar o gerenciamento de grupo de processos
+            # Iniciar processo redirecionando logs para arquivo
+            log_path = self.config_dir / 'sunshine.log'
+            self.log_file = open(log_path, 'a')
+            
             self.process = subprocess.Popen(
                 cmd,
                 text=True,
+                stdout=self.log_file,
+                stderr=subprocess.STDOUT,
                 env=env,
                 cwd=str(self.config_dir), # Forçar diretório de trabalho para configs locais
                 start_new_session=True # Criar novo group ID
@@ -56,7 +61,8 @@ class SunshineHost:
                 exit_code = self.process.wait(timeout=1.0)
                 
                 # Se chegou aqui, o processo terminou (falhou)
-                print(f"Sunshine falhou ao iniciar (Exit code {exit_code}). Verifique os logs acima.")
+                self.log_file.write(f"Sunshine falhou ao iniciar (Exit code {exit_code}).\n")
+                print(f"Sunshine falhou ao iniciar (Exit code {exit_code}). Verifique os logs.")
                 
                 self.process = None
                 self.pid = None
@@ -110,6 +116,12 @@ class SunshineHost:
             # Fallback: garantir que não sobrou nada rodando via pkill
             # Isso resolve casos onde o processo foi iniciado externamente ou PID file perdeu sync
             subprocess.run(['pkill', '-x', 'sunshine'], stderr=subprocess.DEVNULL)
+            
+            # Fechar log
+            if hasattr(self, 'log_file'):
+                try: self.log_file.close()
+                except: pass
+                del self.log_file
                     
             # Remover PID file
             pid_file = self.config_dir / 'sunshine.pid'
