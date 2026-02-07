@@ -14,6 +14,11 @@ configure_ufw() {
         ufw allow $port comment "Big Remote Play - Sunshine"
     done
     
+    # Permitir tráfego em interfaces virtuais (VPNs, ZeroTier)
+    ufw allow in on tun+ comment "Allow VPN/Tunnel"
+    ufw allow in on tap+ comment "Allow VPN/Tunnel"
+    ufw allow in on zt+ comment "Allow ZeroTier"
+    
     ufw reload 2>/dev/null || true
     echo "✅ Regras UFW configuradas"
 }
@@ -35,6 +40,15 @@ configure_iptables() {
     ip6tables -A INPUT -p tcp --dport 48010 -j ACCEPT -m comment --comment "Big Remote Play"
     ip6tables -A INPUT -p udp --dport 47998:48000 -j ACCEPT -m comment --comment "Big Remote Play"
     ip6tables -A INPUT -p udp --dport 48011 -j ACCEPT -m comment --comment "Big Remote Play - PIN"
+    
+    # Permitir tráfego em interfaces virtuais (VPNs, ZeroTier)
+    iptables -A INPUT -i tun+ -j ACCEPT -m comment --comment "Allow VPN/Tunnel"
+    iptables -A INPUT -i tap+ -j ACCEPT -m comment --comment "Allow VPN/Tunnel"
+    iptables -A INPUT -i zt+ -j ACCEPT -m comment --comment "Allow ZeroTier"
+    
+    ip6tables -A INPUT -i tun+ -j ACCEPT -m comment --comment "Allow VPN/Tunnel"
+    ip6tables -A INPUT -i tap+ -j ACCEPT -m comment --comment "Allow VPN/Tunnel"
+    ip6tables -A INPUT -i zt+ -j ACCEPT -m comment --comment "Allow ZeroTier"
     
     echo "✅ Regras iptables configuradas"
     echo "⚠️  Para tornar permanente, salve com: iptables-save > /etc/iptables/iptables.rules"

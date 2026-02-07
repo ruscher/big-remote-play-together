@@ -1,0 +1,40 @@
+Iniciando diagnóstico IPv6...
+
+=== Interfaces IPv6 ===
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 state UNKNOWN qlen 1000
+    inet6 ::1/128 scope host noprefixroute 
+       valid_lft forever preferred_lft forever
+2: enp7s0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP qlen 1000
+    inet6 2804:14c:65a1:4014::187f/128 scope global dynamic noprefixroute 
+       valid_lft 2643sec preferred_lft 2643sec
+    inet6 2804:14c:65a1:4014:772f:cede:1e77:1768/64 scope global dynamic noprefixroute 
+       valid_lft 86391sec preferred_lft 71991sec
+    inet6 fe80::79c2:6f0b:c7f6:6d30/64 scope link noprefixroute 
+       valid_lft forever preferred_lft forever
+4: zt4hoippeg: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 2800 state UNKNOWN qlen 1000
+    inet6 fe80::280e:3bff:feb5:494e/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+5: ztyxavtxv3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 2800 state UNKNOWN qlen 1000
+    inet6 fe80::7c45:70ff:fedd:60db/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+=======================
+
+=== Sunshine Listening Ports (IPv6) ===
+❌ Sunshine não parece estar ouvindo em portas IPv6 (ou permissão negada).
+=======================================
+
+=== Avahi Discovery (IPv6) ===
+Raw Output:
++;ztyxavtxv3;IPv6;alessandro-pc;_nvstream._tcp;local
++;ztyxavtxv3;IPv4;alessandro-pc;_nvstream._tcp;local
+=;ztyxavtxv3;IPv6;alessandro-pc;_nvstream._tcp;local;alessandro-pc.local;fe80::7ca9:b6ff:fe83:77c9;47989;
+=;ztyxavtxv3;IPv4;alessandro-pc;_nvstream._tcp;local;alessandro-pc.local;10.241.85.41;47989;
+Found IPv6 Host: fe80::7ca9:b6ff:fe83:77c9 on ztyxavtxv3
+==============================
+
+=== Connectivity Test (Ping6) ===
+Pinging fe80::7ca9:b6ff:fe83:77c9%ztyxavtxv3...
+❌ Ping failed: fe80::7ca9:b6ff:fe83:77c9%ztyxavtxv3
+Error: /bin/sh: linha 1: ping6: comando não encontrado
+Output: 
+=================================

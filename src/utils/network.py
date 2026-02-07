@@ -31,16 +31,67 @@ class NetworkDiscovery:
         threading.Thread(target=run, daemon=True).start()
         
     def parse_avahi_output(self, output: str) -> List[Dict]:
-        hosts = []; seen = set()
+        """
+        Parses avahi output prioritizing Global IPv6 > IPv4 > Link-Local IPv6
+        """
+        host_map = {}
+        
         for line in output.split('\n'):
             p = line.split(';')
             if len(p) > 7 and p[0] == '=':
+                service_name = p[3]
+                hostname = p[6]
                 ip = p[7]
-                if ip not in seen:
-                    dip = f"[{ip}]" if ":" in ip and not ip.startswith("[") else ip
-                    hosts.append({'name': p[3], 'ip': dip, 'port': int(p[8]), 'status': 'online', 'hostname': p[6]})
-                    seen.add(ip)
-        return hosts
+                interface = p[1]
+                port = int(p[8])
+                
+                # Create entry if not exists
+                if service_name not in host_map:
+                    host_map[service_name] = {
+                        'name': service_name,
+                        'hostname': hostname,
+                        'port': port,
+                        'status': 'online',
+                        'ips': []
+                    }
+                
+                # Classify IP
+                ip_type = 'ipv4'
+                if ':' in ip:
+                    if ip.startswith('fe80'):
+                        ip_type = 'ipv6_link_local'
+                        # Fix scope ID
+                        if "%" not in ip: ip = f"{ip}%{interface}"
+                    else:
+                        ip_type = 'ipv6_global'
+                
+                # Add formatted IP to list
+                # Moonlight needs brackets for IPv6
+                formatted_ip = f"[{ip}]" if ':' in ip and not ip.startswith('[') else ip
+                host_map[service_name]['ips'].append({'ip': formatted_ip, 'type': ip_type, 'raw': ip})
+        
+        final_hosts = []
+        for name, data in host_map.items():
+            # Add all discovered IPs to the list so user can choose
+            for ip_info in data['ips']:
+                display_name = data['name']
+                # Append protocol info to distinguish in UI if needed, 
+                # although the subtitle in UI showing the IP is usually enough.
+                # However, to be explicit:
+                if ip_info['type'] == 'ipv6_link_local':
+                    display_name += " (IPv6 Local)"
+                elif ip_info['type'] == 'ipv6_global':
+                    display_name += " (IPv6 Global)"
+                
+                final_hosts.append({
+                    'name': display_name,
+                    'ip': ip_info['ip'],
+                    'port': data['port'],
+                    'status': 'online',
+                    'hostname': data['hostname']
+                })
+                
+        return final_hosts
         
     def manual_scan(self) -> List[Dict]:
         import concurrent.futures

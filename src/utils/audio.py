@@ -103,6 +103,50 @@ class AudioManager:
                 
         except: pass
             
+    def get_audio_applications(self) -> List[Dict]:
+        """Lista aplicativos reproduzindo áudio"""
+        apps = []
+        try:
+            # First, get sink names map
+            sinks = {}
+            res_sinks = subprocess.run(['pactl', 'list', 'short', 'sinks'], capture_output=True, text=True)
+            for line in res_sinks.stdout.splitlines():
+                parts = line.split('\t')
+                if len(parts) >= 2:
+                    sinks[parts[0]] = parts[1] # ID -> Name
+
+            # List inputs
+            res = subprocess.run(['pactl', 'list', 'sink-inputs'], capture_output=True, text=True)
+            current_app = {}
+            
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if line.startswith('Sink Input #'):
+                    if current_app: apps.append(current_app)
+                    current_app = {'id': line.split('#')[1], 'name': 'Unknown', 'icon': 'audio-x-generic-symbolic'}
+                elif line.startswith('Sink:'):
+                    sink_id = line.split(':')[1].strip()
+                    current_app['sink_index'] = sink_id
+                    current_app['sink_name'] = sinks.get(sink_id, "")
+                elif 'application.name = ' in line:
+                    current_app['name'] = line.split('=')[1].strip().strip('"')
+                elif 'application.icon_name = ' in line:
+                    current_app['icon'] = line.split('=')[1].strip().strip('"')
+                elif 'media.name = ' in line and current_app.get('name') == 'Unknown':
+                    current_app['name'] = line.split('=')[1].strip().strip('"')
+                    
+            if current_app: apps.append(current_app)
+            
+            # Filter out non-apps (like monitors/loopbacks if they appear as inputs)
+            return [a for a in apps if a.get('name') not in ['Sunshine', 'Simultaneous output to', 'Unknown']]
+        except: return []
+
+    def move_app_to_sink(self, app_id: str, sink_name: str):
+        try:
+            subprocess.run(['pactl', 'move-sink-input', str(app_id), sink_name], capture_output=True)
+            return True
+        except: return False
+
     def cleanup(self):
         """Remove módulos de loopback e restaura sink padrão"""
         if self.original_sink:

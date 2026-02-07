@@ -257,7 +257,20 @@ class GuestView(Gtk.Box):
         info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2); info.set_valign(Gtk.Align.CENTER)
         n = Gtk.Label(label=host['name']); n.set_halign(Gtk.Align.START); n.add_css_class('heading')
         i = Gtk.Label(label=host['ip']); i.set_halign(Gtk.Align.START); i.add_css_class('dim-label')
-        info.append(n); info.append(i); box.append(radio); box.append(icon); box.append(info); row.set_child(box)
+        info.append(n); info.append(i); box.append(radio); box.append(icon); box.append(info)
+        
+        spacer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL); spacer.set_hexpand(True)
+        box.append(spacer)
+        
+        copy_btn = Gtk.Button(icon_name="edit-copy-symbolic")
+        copy_btn.add_css_class("flat"); copy_btn.set_valign(Gtk.Align.CENTER); copy_btn.set_tooltip_text("Copiar IP")
+        def copy_ip(_):
+            Gdk.Display.get_default().get_clipboard().set(host['ip'])
+            self.show_toast(f"IP Copiado: {host['ip']}")
+        copy_btn.connect("clicked", copy_ip)
+        box.append(copy_btn)
+        
+        row.set_child(box)
         gesture = Gtk.GestureClick(); gesture.connect("pressed", lambda g, n, x, y: radio.set_active(True)); row.add_controller(gesture)
         return row
 
@@ -288,9 +301,7 @@ class GuestView(Gtk.Box):
     def connect_to_host(self, host):
         self.show_loading(True)
         def run():
-            if not self.moonlight.probe_host(host['ip']):
-                def on_pin(p): GLib.idle_add(lambda: self.show_pairing_dialog(host['ip'], p, None, host['name']))
-                if not self.moonlight.pair(host['ip'], on_pin): GLib.idle_add(lambda: (self.show_loading(False), self.show_error_dialog('Erro', 'Pareamento falhou'))); return
+
             if self.scale_row.get_active():
                 res = self.get_auto_resolution()
             else:
