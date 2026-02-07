@@ -770,8 +770,13 @@ class HostView(Gtk.Box):
                     # Returns True if success
                     if self.audio_manager.enable_streaming_audio(host_sink):
                         # Dynamically get monitor source name
-                        monitor_src = self.audio_manager.get_sink_monitor_source("SunshineGameSink")
-                        sunshine_config['audio_sink'] = monitor_src if monitor_src else "SunshineGameSink.monitor"
+                        # OLD: monitor_src = self.audio_manager.get_sink_monitor_source("SunshineGameSink")
+                        # OLD: sunshine_config['audio_sink'] = monitor_src if monitor_src else "SunshineGameSink.monitor"
+                        
+                        # SOLUÇÃO RADICAL: Usar o nome do SINK diretamente, conforme o script bash do usuário.
+                        # O Sunshine (backend pulse) deve ser capaz de gravar do Sink especificando o nome dele.
+                        sunshine_config['audio_sink'] = "SunshineGameSink"
+                        
                         print(f"DEBUG: Configured Sunshine audio_sink to: {sunshine_config['audio_sink']}")
                         
                         # Start Mixer UI updates

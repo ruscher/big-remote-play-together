@@ -96,15 +96,13 @@ class AudioManager:
             subprocess.run(['pactl', 'set-sink-volume', 'SunshineGameSink', '100%'], check=False)
 
             # 3. Loopback para o Host (para o usuário ouvir o que toca no GameSink)
-            # Sem definir latência fixa, deixando o PulseAudio gerenciar (como no script .sh)
-            # source = SunshineGameSink.monitor
+            # latência padrão do PulseAudio (sem latency_msec=1 que causava falhas)
             monitor_source = "SunshineGameSink.monitor" 
             
             res_loop = subprocess.run([
                 'pactl', 'load-module', 'module-loopback',
                 f'source={monitor_source}',
-                f'sink={host_sink}',
-                'latency_msec=1'
+                f'sink={host_sink}'
             ], capture_output=True, text=True, check=True)
              
             # 4. Tentar desmutar o loopback recém criado
@@ -118,17 +116,20 @@ class AudioManager:
                 # Listar inputs detalhados
                 res_inputs = subprocess.run(['pactl', 'list', 'sink-inputs'], capture_output=True, text=True)
                 
-                current_id = None
                 target_id = None
                 
-                for line in res_inputs.stdout.splitlines():
+                # Parsing mais robusto
+                lines = res_inputs.stdout.splitlines()
+                current_input_id = None
+                
+                for line in lines:
                     line = line.strip()
                     if line.startswith('Sink Input #'):
-                        current_id = line.split('#')[1]
+                        current_input_id = line.split('#')[1]
                     elif line.startswith('Owner Module: '):
                         owner_mod = line.split(':', 1)[1].strip()
-                        if owner_mod == loop_id and current_id:
-                            target_id = current_id
+                        if owner_mod == loop_id and current_input_id:
+                            target_id = current_input_id
                             break
                         
                 if target_id:
