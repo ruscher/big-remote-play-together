@@ -16,15 +16,28 @@ class MoonlightClient:
             else: cmd.extend(['--video-decoder', 'software'])
             print(f"DEBUG: Connecting with options: resolution={kw.get('width')}x{kw.get('height')}, fps={kw.get('fps')}, audio={kw.get('audio', True)}")
             print(f"DEBUG: Full command: {' '.join(cmd)}")
-            self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            # AVOID PIPE BLOCKING: Use DEVNULL or None (inherit) for long running process!
+            # Using PIPE without reading loop causes "Starting Desktop..." freeze when buffer fills (64K).
+            # We want to wait 1 sec to check for immediate crash, but we can't do that easily with DEVNULL/None 
+            # and verify output.
+            # Compromise: Use a temporary check or just let it run.
+            # If we want to see logs in terminal, use None. If we want silence, DEVNULL.
+            # The User runs from terminal usually, so None is better for debugging.
+            
+            self.process = subprocess.Popen(cmd, stdout=None, stderr=None, text=True)
             self.connected_host = ip
+            
+            # Simple check if it stays alive for a moment
             try:
                 exit_code = self.process.wait(timeout=1.0)
-                stdout, stderr = self.process.communicate()
-                print(f"Moonlight terminou (Code {exit_code})\nSTDOUT: {stdout}\nSTDERR: {stderr}")
+                # If we are here, it exited immediately
+                print(f"Moonlight terminou prematuramente (Code {exit_code})")
                 return False
-            except subprocess.TimeoutExpired: pass
-            print(f"Conectado a {ip}"); return True
+            except subprocess.TimeoutExpired: 
+                # Still running, good!
+                pass
+            
+            print(f"Conectado a {ip} (PID: {self.process.pid})"); return True
         except Exception as e: print(f"Erro ao conectar: {e}"); return False
     def is_connected(self): return self.process and self.process.poll() is None
     def disconnect(self):
