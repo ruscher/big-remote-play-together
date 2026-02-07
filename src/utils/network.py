@@ -70,6 +70,21 @@ class NetworkDiscovery:
                 formatted_ip = f"[{ip}]" if ':' in ip and not ip.startswith('[') else ip
                 host_map[service_name]['ips'].append({'ip': formatted_ip, 'type': ip_type, 'raw': ip})
         
+        # Enrichment: Ensure IPv4 exists
+        for name, data in host_map.items():
+            has_v4 = any(ip['type'] == 'ipv4' for ip in data['ips'])
+            if not has_v4 and data['hostname']:
+                try:
+                    # Try to resolve IPv4 explicitly
+                    hostname = data['hostname']
+                    # Sometimes avahi returns hostname without .local, try both if needed
+                    # But usually it is hostname.local
+                    ipv4 = socket.gethostbyname(hostname)
+                    if ipv4 and not ipv4.startswith('127.'):
+                        data['ips'].append({'ip': ipv4, 'type': 'ipv4', 'raw': ipv4})
+                except:
+                    pass
+        
         final_hosts = []
         for name, data in host_map.items():
             # Add all discovered IPs to the list so user can choose
