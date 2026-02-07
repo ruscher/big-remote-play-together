@@ -608,7 +608,7 @@ class HostView(Gtk.Box):
     def _run_audio_enforcer(self):
         # Força o roteamento:
         # Apps em self.private_audio_apps -> Host Sink (Somente local)
-        # Outros -> SunshineHybrid (Stream + Host)
+        # Outros -> SunshineGameSink (Stream + Host)
         if not self.is_hosting or not self.audio_mixer_expander.get_visible(): return True
         if not hasattr(self, 'active_host_sink') or not self.active_host_sink: return True
         
@@ -623,27 +623,32 @@ class HostView(Gtk.Box):
                     name = app.get('name', '')
                     
                     # Double check to avoid loops (incluindo o GameSink e Loopback)
-                    if 'sunshine' in name.lower() or 'game' in name.lower() or 'loopback' in name.lower(): continue
+                    # NÃO mover o próprio loopback e nem o monitor
+                    if 'sunshine' in name.lower() or 'loopback' in name.lower(): continue
 
+                    # Definir alvo
                     target = private_sink if name in self.private_audio_apps else shared_sink
                     
-                    # Verifica se já está no sink correto (pelo nome ou id)
+                    # Verifica atual sink
                     current_sink = app.get('sink_name', '')
                     
-                    # Se target for 'SunshineGameSink' e o app estiver no Hardware, mova.
-                    # Se target for Hardware e estiver em SunshineGameSink, mova.
-                    
+                    # Se app já está no target, ignora
+                    if current_sink == target: continue
+
+                    # Lógica de movimentação
                     if target == shared_sink:
-                        if 'sunshine' not in current_sink.lower() and 'game' not in current_sink.lower():
-                            print(f"Enforcer: Movendo {name} para GameSink ({target})")
-                            self.audio_manager.move_app(app_id, target)
+                        # Queremos mover para GameSink
+                        # Mas CUIDADO: Se SunshineGameSink for null-sink e estiver mudo no final, usuário reclama.
+                        # Mas já configuramos Loopback.
+                        print(f"Enforcer: Movendo {name} para Stream ({target})")
+                        self.audio_manager.move_app(app_id, target)
                     else:
-                        # Se target é Hardware (Private), queremos que ele NÃO esteja no Sunshine
-                        if 'sunshine' in current_sink.lower() or 'game' in current_sink.lower():
-                            print(f"Enforcer: Movendo {name} para Privado ({target})")
-                            self.audio_manager.move_app(app_id, target)
+                        # Queremos mover para Private (Hardware)
+                        print(f"Enforcer: Movendo {name} para Local ({target})")
+                        self.audio_manager.move_app(app_id, target)
                             
-            except: pass
+            except Exception as e:
+                print(f"Enforcer Error: {e}")
         return True
 
     def _refresh_audio_mixer_ui(self):
