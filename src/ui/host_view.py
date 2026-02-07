@@ -702,9 +702,9 @@ class HostView(Gtk.Box):
             return
 
         is_shared = row.get_active()
-        target_sink = "Sunshine-Hybrid" if is_shared else target_hw
+        target_sink = "SunshineHybrid" if is_shared else target_hw
         
-        # Verify if Sunshine-Hybrid exists before trying to move
+        # Verify if SunshineHybrid exists before trying to move
         if is_shared:
             sinks = [s['name'] for s in self.audio_manager.get_output_devices()]
             # Actually get_output_devices parses `pactl list sinks`.
@@ -777,7 +777,6 @@ class HostView(Gtk.Box):
 
             # Unified Audio Configuration
             self.dual_audio_target = None
-            audio_monitor_source = None
             
             if self.audio_row.get_active():
                 sunshine_config['audio'] = 'pulse'
@@ -794,12 +793,13 @@ class HostView(Gtk.Box):
                 if self.audio_manager: self.audio_manager.save_state()
                 
                 # Setup sinks (Null + Hybrid)
-                # Sunshine-Stereo is the Null sink that we want Sunshine to capture from
                 if self.audio_manager:
-                    self.audio_manager.setup_sunshine_audio(self.dual_audio_target)
-                    # We explicitly tell Sunshine to capture our Null Sink monitor
-                    audio_monitor_source = "Sunshine-Stereo.monitor"
-                    sunshine_config['audio_sink'] = audio_monitor_source
+                    # capture_sink is "SunshineStereo" (Null Sink)
+                    capture_sink = self.audio_manager.setup_sunshine_audio(self.dual_audio_target)
+                    
+                    # We pass the Sink Name to Sunshine. 
+                    # Sunshine (Pulse) should automatically find the Monitor Source for this Sink.
+                    sunshine_config['audio_sink'] = capture_sink
             else:
                 sunshine_config['audio'] = 'none'
                 self.audio_manager.cleanup()
