@@ -64,8 +64,11 @@ class AudioManager:
 
     def enable_streaming_audio(self, host_sink: str) -> bool:
         """
-        Ativa o modo Streaming (Host + Guest) usando a estratégia 'GameSink' + Loopback.
-        Baseado no script Sunshine Áudio Isolado.
+        Ativa o modo Streaming (Host + Guest) usando estratégia RADICAL: Combine Sink.
+        Em vez de Null Sink + Loopback (que falha e muta), usamos um Combine Sink.
+        SunshineGameSink -> [Hardware Sink]
+        O Sunshine captura do SunshineGameSink.monitor.
+        O Host escuta porque o Hardware Sink é um slave.
         """
         # Se o host_sink for virtual ou nulo, tenta achar o primeiro hardware real
         if not host_sink or self.is_virtual(host_sink):
@@ -81,122 +84,39 @@ class AudioManager:
         self.disable_streaming_audio(None) 
         
         try:
-            print(f"Habilitando Áudio Isolado -> GameSink (Stream) + Loopback p/ Host ({host_sink})")
+            print(f"Habilitando Áudio Isolado (Radical) -> Combine Sink 'SunshineGameSink' -> Slave: {host_sink}")
             
-            # 1. Null Sink 'SunshineGameSink' (onde o jogo toca e o Sunshine grava)
+            # 1. Combine Sink 'SunshineGameSink'
+            # Isso cria uma saída virtual que repassa o áudio para o host_sink (Hardware)
+            # E disponibiliza um .monitor para o Sunshine gravar.
             subprocess.run([
-                'pactl', 'load-module', 'module-null-sink',
+                'pactl', 'load-module', 'module-combine-sink',
                 'sink_name=SunshineGameSink',
+                f'slaves={host_sink}',
                 'sink_properties=device.description=SunshineGameSink'
             ], check=True)
             
-            # 2. Pequeno delay e garantir volumes do Null Sink
+            # 2. Pequeno delay e garantir volumes
             import time; time.sleep(0.5)
             subprocess.run(['pactl', 'set-sink-mute', 'SunshineGameSink', '0'], check=False)
             subprocess.run(['pactl', 'set-sink-volume', 'SunshineGameSink', '100%'], check=False)
 
-            # 3. Loopback para o Host (para o usuário ouvir o que toca no GameSink)
-            # latência padrão do PulseAudio (sem latency_msec=1 que causava falhas)
-            monitor_source = "SunshineGameSink.monitor" 
-            
-            res_loop = subprocess.run([
-                'pactl', 'load-module', 'module-loopback',
-                f'source={monitor_source}',
-                f'sink={host_sink}'
-            ], capture_output=True, text=True, check=True)
-             
-            # 4. Tentar desmutar o loopback recém criado
-            loop_id = res_loop.stdout.strip()
-            print(f"Loopback criado com ID: {loop_id}")
-            
-            # Garantir que o stream do Loopback esteja 100% e unmuted
-            try:
-                # Buscar o ID do sink-input do Loopback via Owner Module
-                import time; time.sleep(0.5)
-                # Listar inputs detalhados
-                res_inputs = subprocess.run(['pactl', 'list', 'sink-inputs'], capture_output=True, text=True)
-                
-                target_id = None
-                
-                # Parsing mais robusto
-                lines = res_inputs.stdout.splitlines()
-                current_input_id = None
-                
-                for line in lines:
-                    line = line.strip()
-                    if line.startswith('Sink Input #'):
-                        current_input_id = line.split('#')[1]
-                    elif line.startswith('Owner Module: '):
-                        owner_mod = line.split(':', 1)[1].strip()
-                        if owner_mod == loop_id and current_input_id:
-                            target_id = current_input_id
-                            break
-                        
-                if target_id:
-                    print(f"Encontrado loopback stream input: {target_id} (Owner Module: {loop_id})")
-                    subprocess.run(['pactl', 'set-sink-input-mute', target_id, '0'], check=False)
-                    subprocess.run(['pactl', 'set-sink-input-volume', target_id, '100%'], check=False)
-                    print(f"Loopback stream {target_id} unmuted e setado para 100%")
-                else:
-                    print(f"AVISO: ID exato não encontrado. Tentando estratégia RADICAL: Unmuting ALL Loopbacks.")
-                    # Fallback Radical: Unmute em TODOS os sink-inputs que parecem ser loopbacks
-                    # Isso garante que o som saia, conforme solicitado pelo usuário.
-                    for line in lines:
-                        line = line.strip()
-                        if line.startswith('Sink Input #'):
-                            idx = line.split('#')[1]
-                            # Verificar se é loopback (normalmente tem a ver com módulo loopback ou nome)
-                            # Vamos tentar desmutar cegamente apenas se tivermos certeza, mas aqui é radical.
-                            # Melhor: Listar modules e ver quais inputs pertencem a module-loopback
-                            pass
-                    
-                    # Vamos iterar novamente procurando por Owner Module que seja de um loopback (qualquer um)
-                    # Não, vamos ser mais simples: "pactl list sink-inputs short" e filtrar por module-loopback se possível? 
-                    # O pactl short não mostra o modulo dono.
-                    
-                    # Vamos re-ler usando a lista completa já capturada
-                    current_idx = None
-                    is_loopback = False
-                    for line in lines:
-                        line = line.strip()
-                        if line.startswith('Sink Input #'):
-                            # Processar o anterior se era loopback
-                            if current_idx and is_loopback:
-                                subprocess.run(['pactl', 'set-sink-input-mute', current_idx, '0'], check=False)
-                                subprocess.run(['pactl', 'set-sink-input-volume', current_idx, '100%'], check=False)
-                                print(f"Fallback: Loopback {current_idx} unmuted.")
-                            
-                            current_idx = line.split('#')[1]
-                            is_loopback = False
-                        
-                        if 'module-loopback' in line or 'Loopback' in line or (loop_id and f'Owner Module: {loop_id}' in line):
-                             is_loopback = True
-                             
-                    # Processar o último
-                    if current_idx and is_loopback:
-                         subprocess.run(['pactl', 'set-sink-input-mute', current_idx, '0'], check=False)
-                         subprocess.run(['pactl', 'set-sink-input-volume', current_idx, '100%'], check=False)
-                         print(f"Fallback: Loopback {current_idx} unmuted.")
-
-            except Exception as e:
-                print(f"Erro ao tentar configurar volume do loopback: {e}")
-
-            # 5. Definir SunshineGameSink como padrão (opcional, mas bom pra jogos novos irem pra ele)
+            # 3. Definir SunshineGameSink como padrão
             self.set_default_sink("SunshineGameSink")
 
-            # 6. Verify creation
+            # 4. Verificar criação
             time.sleep(0.2)
             sinks = subprocess.run(['pactl', 'list', 'short', 'sinks'], capture_output=True, text=True).stdout
             if 'SunshineGameSink' not in sinks:
-                print("ERRO CRÍTICO: SunshineGameSink não foi criado após comando!")
+                print("ERRO CRÍTICO: SunshineGameSink (Combine) não foi criado!")
                 self.disable_streaming_audio(host_sink)
                 return False
                 
-            print("Áudio Streaming habilitado e verificado com sucesso.")
+            print(f"Áudio Radical Ativado: SunshineGameSink combinando para {host_sink}")
             return True
             
         except Exception as e:
-            print(f"Falha ao ativar streaming de áudio: {e}")
+            print(f"Falha ao ativar streaming de áudio (Combine): {e}")
             self.disable_streaming_audio(host_sink) 
             return False
 

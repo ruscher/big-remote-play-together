@@ -624,7 +624,8 @@ class HostView(Gtk.Box):
                     
                     # Double check to avoid loops (incluindo o GameSink e Loopback)
                     # NÃO mover o próprio loopback e nem o monitor
-                    if 'sunshine' in name.lower() or 'loopback' in name.lower(): continue
+                    # TAMBÉM NÃO mover o Moonlight (Client) para evitar feedback loop infinito se rodar localmente
+                    if 'sunshine' in name.lower() or 'loopback' in name.lower() or 'moonlight' in name.lower(): continue
 
                     # Definir alvo
                     target = private_sink if name in self.private_audio_apps else shared_sink
