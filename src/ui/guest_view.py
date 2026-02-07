@@ -301,6 +301,12 @@ class GuestView(Gtk.Box):
     def connect_to_host(self, host):
         self.show_loading(True)
         def run():
+            # 1. Check if already paired
+            if not self.moonlight.list_apps(host['ip']):
+                print(f"DEBUG: Host {host['ip']} not paired. Starting pairing flow.")
+                GLib.idle_add(self.show_loading, False)
+                GLib.idle_add(lambda: self.start_pairing_flow(host))
+                return
 
             if self.scale_row.get_active():
                 res = self.get_auto_resolution()
@@ -313,9 +319,52 @@ class GuestView(Gtk.Box):
             fps_idx = self.fps_row.get_selected(); fps_map = {0: "30", 1: "60", 2: "120"}
             fps = getattr(self, 'custom_fps_val', '60') if fps_idx == 3 else fps_map.get(fps_idx, "60")
             opts = {'width': w, 'height': h, 'fps': fps, 'bitrate': int(self.bitrate_scale.get_value() * 1000), 'display_mode': ['borderless', 'fullscreen', 'windowed'][self.display_mode_row.get_selected()], 'audio': self.audio_row.get_active(), 'hw_decode': self.hw_decode_row.get_active()}
-            if self.moonlight.connect(host['ip'], **opts): GLib.idle_add(lambda: (self.show_loading(False), self.perf_monitor.set_connection_status(host['name'], "Stream Ativo", True), self.perf_monitor.start_monitoring()))
-            else: GLib.idle_add(lambda: (self.show_loading(False), self.show_error_dialog('Erro', 'Falha ao conectar')))
+            
+            if self.moonlight.connect(host['ip'], **opts): 
+                GLib.idle_add(lambda: (self.show_loading(False), self.perf_monitor.set_connection_status(host['name'], "Stream Ativo", True), self.perf_monitor.start_monitoring()))
+            else: 
+                GLib.idle_add(lambda: (self.show_loading(False), self.show_error_dialog('Erro', 'Falha ao conectar. Verifique se o Moonlight está emparelhado.')))
         threading.Thread(target=run, daemon=True).start()
+
+    def start_pairing_flow(self, host):
+        """Inicia fluxo de pareamento (Automático para localhost, Manual para remoto)"""
+        
+        def on_pin_callback(pin):
+            # Check if localhost
+            is_local = host['ip'] in ['127.0.0.1', 'localhost', '::1']
+            
+            if is_local:
+                # Tentar automação
+                try:
+                    from host.sunshine_manager import SunshineHost
+                    from pathlib import Path
+                    sun = SunshineHost(Path.home() / '.config' / 'big-remoteplay' / 'sunshine')
+                    if sun.is_running():
+                        GLib.idle_add(lambda: self.show_toast(f"Tentando pareamento automático PIN: {pin}"))
+                        ok, msg = sun.send_pin(pin)
+                        if ok:
+                            GLib.idle_add(lambda: self.show_toast("Pareamento automático enviado!"))
+                            return # Sucesso, moonlight deve detectar e finalizar
+                        else:
+                            print(f"Falha no pareamento automático: {msg}")
+                except Exception as e:
+                    print(f"Erro na automação de pareamento: {e}")
+            
+            # Fallback para Dialog UI
+            GLib.idle_add(lambda: self.show_pairing_dialog(host['ip'], pin, hostname=host.get('name')))
+
+        def do_pair():
+            self.show_toast("Iniciando pareamento...")
+            success = self.moonlight.pair(host['ip'], on_pin_callback=on_pin_callback)
+            
+            GLib.idle_add(self.close_pairing_dialog)
+            
+            if success:
+                GLib.idle_add(lambda: (self.show_toast("Pareado com sucesso!"), self.connect_to_host(host)))
+            else:
+                 GLib.idle_add(lambda: self.show_error_dialog("Erro de Pareamento", "Não foi possível parear com o host.\nVerifique se o PIN foi inserido corretamente."))
+
+        threading.Thread(target=do_pair, daemon=True).start()
 
 
     def show_loading(self, show=True, message=""):
