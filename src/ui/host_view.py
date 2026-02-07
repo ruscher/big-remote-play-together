@@ -799,7 +799,8 @@ class HostView(Gtk.Box):
                     
                     # We pass the Sink Name to Sunshine. 
                     # Sunshine (Pulse) should automatically find the Monitor Source for this Sink.
-                    sunshine_config['audio_sink'] = capture_sink
+                    # FIX: Sunshine needs the SOURCE name, which is sink_name.monitor
+                    sunshine_config['audio_sink'] = f"{capture_sink}.monitor"
             else:
                 sunshine_config['audio'] = 'none'
                 self.audio_manager.cleanup()
