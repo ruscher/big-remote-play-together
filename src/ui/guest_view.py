@@ -299,7 +299,21 @@ class GuestView(Gtk.Box):
         box.append(info); box.append(pin); box.append(btn)
         return box
     def connect_to_host(self, host):
+        # Coletar valores da UI na Thread Principal (GTK não é thread-safe)
+        scale_active = self.scale_row.get_active()
+        res_idx = self.resolution_row.get_selected()
+        fps_idx = self.fps_row.get_selected()
+        bitrate_val = self.bitrate_scale.get_value()
+        display_mode_idx = self.display_mode_row.get_selected()
+        audio_active = self.audio_row.get_active()
+        hw_decode_active = self.hw_decode_row.get_active()
+        
+        # Valores customizados já são atributos seguros
+        custom_res = getattr(self, 'custom_resolution_val', '1920x1080')
+        custom_fps = getattr(self, 'custom_fps_val', '60')
+
         self.show_loading(True)
+        
         def run():
             # 1. Check if already paired
             if not self.moonlight.list_apps(host['ip']):
@@ -308,23 +322,75 @@ class GuestView(Gtk.Box):
                 GLib.idle_add(lambda: self.start_pairing_flow(host))
                 return
 
-            if self.scale_row.get_active():
-                res = self.get_auto_resolution()
+            if scale_active:
+                # get_auto_resolution usa GDK, que também prefere main thread, 
+                # mas aqui pode funcionar ou deve ser movido. 
+                # Idealmente mover para fora, mas requer lock. 
+                # Vamos assumir que get_auto_resolution é "seguro" o suficiente ou falha graciosamente.
+                # Melhor: usar GLib.idle_add para buscar e esperar?
+                # Pela simplicidade, vamos usar um valor padrão fixo se falhar, ou tentar chamar.
+                # Mas para evitar crash, vamos usar um valor seguro.
+                # Nota: get_auto_resolution usa Gdk.Display... melhor evitar na thread.
+                # Vamos usar 1920x1080 como fallback seguro aqui se for complexo,
+                # mas o ideal seria ter pego antes.
+                res = "1920x1080" # Fallback
+                # Tentar chamar safe
+                # res = self.get_auto_resolution() # RISCO
             else:
-                res_idx = self.resolution_row.get_selected()
                 res_map = {0: "1280x720", 1: "1920x1080", 2: "2560x1440", 3: "3840x2160"}
-                res = getattr(self, 'custom_resolution_val', '1920x1080') if res_idx == 4 else res_map.get(res_idx, "1920x1080")
+                res = custom_res if res_idx == 4 else res_map.get(res_idx, "1920x1080")
             
+            # ATENÇÃO: Se scale_active era True, pegamos o valor lá fora?
+            # get_auto_resolution precisa de acesso ao monitor.
+            # Vamos corrigir pegando TUDO antes.
+            pass
+
             w, h = res.split('x') if 'x' in res else ("1920", "1080")
-            fps_idx = self.fps_row.get_selected(); fps_map = {0: "30", 1: "60", 2: "120"}
-            fps = getattr(self, 'custom_fps_val', '60') if fps_idx == 3 else fps_map.get(fps_idx, "60")
-            opts = {'width': w, 'height': h, 'fps': fps, 'bitrate': int(self.bitrate_scale.get_value() * 1000), 'display_mode': ['borderless', 'fullscreen', 'windowed'][self.display_mode_row.get_selected()], 'audio': self.audio_row.get_active(), 'hw_decode': self.hw_decode_row.get_active()}
+            fps_map = {0: "30", 1: "60", 2: "120"}
+            fps = custom_fps if fps_idx == 3 else fps_map.get(fps_idx, "60")
+            
+            display_mode = ['borderless', 'fullscreen', 'windowed'][display_mode_idx]
+            
+            opts = {
+                'width': w, 
+                'height': h, 
+                'fps': fps, 
+                'bitrate': int(bitrate_val * 1000), 
+                'display_mode': display_mode, 
+                'audio': audio_active, 
+                'hw_decode': hw_decode_active
+            }
             
             if self.moonlight.connect(host['ip'], **opts): 
                 GLib.idle_add(lambda: (self.show_loading(False), self.perf_monitor.set_connection_status(host['name'], "Stream Ativo", True), self.perf_monitor.start_monitoring()))
             else: 
                 GLib.idle_add(lambda: (self.show_loading(False), self.show_error_dialog('Erro', 'Falha ao conectar. Verifique se o Moonlight está emparelhado.')))
-        threading.Thread(target=run, daemon=True).start()
+        
+        # Inserir lógica de resolução automática ANTES da thread para segurança total
+        if scale_active:
+             res_auto = self.get_auto_resolution()
+             def run_patched():
+                 # Usar res_auto capturado no escopo
+                 w, h = res_auto.split('x') if 'x' in res_auto else ("1920", "1080")
+                 fps_map = {0: "30", 1: "60", 2: "120"}
+                 fps = custom_fps if fps_idx == 3 else fps_map.get(fps_idx, "60")
+                 display_mode = ['borderless', 'fullscreen', 'windowed'][display_mode_idx]
+                 opts = {'width': w, 'height': h, 'fps': fps, 'bitrate': int(bitrate_val * 1000), 'display_mode': display_mode, 'audio': audio_active, 'hw_decode': hw_decode_active}
+                 
+                 # Copy-paste da checagem de pairing
+                 if not self.moonlight.list_apps(host['ip']):
+                    GLib.idle_add(self.show_loading, False)
+                    GLib.idle_add(lambda: self.start_pairing_flow(host))
+                    return
+
+                 if self.moonlight.connect(host['ip'], **opts): 
+                    GLib.idle_add(lambda: (self.show_loading(False), self.perf_monitor.set_connection_status(host['name'], "Stream Ativo", True), self.perf_monitor.start_monitoring()))
+                 else: 
+                    GLib.idle_add(lambda: (self.show_loading(False), self.show_error_dialog('Erro', 'Falha ao conectar')))
+             
+             threading.Thread(target=run_patched, daemon=True).start()
+        else:
+             threading.Thread(target=run, daemon=True).start()
 
     def start_pairing_flow(self, host):
         """Inicia fluxo de pareamento (Automático para localhost, Manual para remoto)"""
