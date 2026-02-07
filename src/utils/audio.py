@@ -72,36 +72,58 @@ class AudioManager:
         print(f"Estado de áudio salvo para restauração: {self.original_sink}")
 
     def setup_sunshine_audio(self, dual_output: Optional[str] = None):
-        """Configura áudio usando os sinks nativos do Sunshine"""
+        """Configura áudio criando um Null Sink e um Combine Sink para áudio Híbrido"""
         self.cleanup() # Limpa modulos anteriores desta sessão
         self.cleanup_legacy() # Limpa lixo antigo
         
         # Se não salvou estado explicitamente antes, tenta salvar agora
         if not self.original_sink: self.save_state()
         
-        # Tenta encontrar o sink do Sunshine (Stereo preferido)
-        sunshine_sink = "sink-sunshine-stereo"
-        
+        # 1. Cria um Null Sink que servirá como destino "puro" para captura (se desejado)
+        # e como um dos destinos do áudio compartilhado.
+        sunshine_null_sink = "Sunshine-Stereo"
         try:
-            # Se Dual Audio, usamos module-combine-sink em vez de loopback
-            # O combine-sink divide o áudio na saída, evitando o "ciclo de gravação" que causa microfonia
-            if dual_output:
+            cmd = [
+                'pactl', 'load-module', 'module-null-sink',
+                f'sink_name={sunshine_null_sink}',
+                'sink_properties=device.description=Sunshine-Input'
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0:
+                self.active_modules.append(res.stdout.strip())
+            else:
+                print(f"Erro ao criar null sink: {res.stderr}")
+                # Fallback? Se falhar null sink, sistema fica instavel.
+                
+        except Exception as e:
+            print(f"Exceção criando null sink: {e}")
+
+        # Nome do sink final que será o padrão
+        target_default_sink = sunshine_null_sink
+        
+        # 2. Se Dual Audio, cria o Combine Sink
+        if dual_output:
+            hybrid_name = "Sunshine-Hybrid"
+            # Combine o Null Sink (para isolamento) com a Saída Física (para ouvir localmente)
+            try:
                 cmd = [
                     'pactl', 'load-module', 'module-combine-sink',
-                    'sink_name=Sunshine-Hybrid',
-                    f'slaves={sunshine_sink},{dual_output}',
+                    f'sink_name={hybrid_name}',
+                    f'slaves={sunshine_null_sink},{dual_output}',
                     'sink_properties=device.description=Sunshine-Híbrido'
                 ]
                 res = subprocess.run(cmd, capture_output=True, text=True)
                 if res.returncode == 0:
                     self.active_modules.append(res.stdout.strip())
-                    self.set_default_sink('Sunshine-Hybrid')
-                    return
+                    target_default_sink = hybrid_name
+                else:
+                    print(f"Erro ao criar combine sink: {res.stderr}")
+            except Exception as e:
+                print(f"Exceção criando combine sink: {e}")
 
-            # Se não tem dual audio, ou se falhar, joga direto pro Sunshine
-            self.set_default_sink(sunshine_sink)
-                
-        except: pass
+        # 3. Define como padrão
+        self.set_default_sink(target_default_sink)
+
             
     def get_audio_applications(self) -> List[Dict]:
         """Lista aplicativos reproduzindo áudio"""

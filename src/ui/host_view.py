@@ -777,15 +777,29 @@ class HostView(Gtk.Box):
 
             # Unified Audio Configuration
             self.dual_audio_target = None
+            audio_monitor_source = None
+            
             if self.audio_row.get_active():
                 sunshine_config['audio'] = 'pulse'
                 
+                # Setup Audio Isolation Sinks BEFORE starting Sunshine
                 if self.dual_audio_row.get_active():
                     idx = self.audio_output_row.get_selected()
                     if self.audio_devices and 0 <= idx < len(self.audio_devices):
                          self.dual_audio_target = self.audio_devices[idx]['name']
                          # Show Audio Mixer if dual audio is active
                          self.audio_mixer_expander.set_visible(True)
+
+                # Save state first
+                if self.audio_manager: self.audio_manager.save_state()
+                
+                # Setup sinks (Null + Hybrid)
+                # Sunshine-Stereo is the Null sink that we want Sunshine to capture from
+                if self.audio_manager:
+                    self.audio_manager.setup_sunshine_audio(self.dual_audio_target)
+                    # We explicitly tell Sunshine to capture our Null Sink monitor
+                    audio_monitor_source = "Sunshine-Stereo.monitor"
+                    sunshine_config['audio_sink'] = audio_monitor_source
             else:
                 sunshine_config['audio'] = 'none'
                 self.audio_manager.cleanup()
@@ -797,6 +811,7 @@ class HostView(Gtk.Box):
                 session = os.environ.get('XDG_SESSION_TYPE', '').lower()
                 platform = 'wayland' if session == 'wayland' else 'x11'
             sunshine_config['platform'] = platform
+
 
             if platform != 'wayland':
                 monitor_idx = self.monitor_row.get_selected()
@@ -817,16 +832,14 @@ class HostView(Gtk.Box):
             if platform == 'x11' and self.monitor_row.get_selected() == 0:
                 sunshine_config['output_name'] = ':0'
             
-            # Save audio state BEFORE starting Sunshine, to capture the real default sink
-            if self.audio_manager: self.audio_manager.save_state()
-            
             self.sunshine.configure(sunshine_config)
             if not self.sunshine.start():
                 self.show_error_dialog('Erro ao Iniciar', 'Não foi possível iniciar o Sunshine.')
                 return
             
-            if self.audio_row.get_active():
-                GLib.timeout_add(2000, lambda: (self.audio_manager.setup_sunshine_audio(self.dual_audio_target), self.show_toast("Áudio Configurado"), self.start_audio_mixer_refresh())[1])
+            if self.audio_row.get_active() and self.dual_audio_row.get_active():
+                GLib.timeout_add(1000, lambda: (self.start_audio_mixer_refresh(), True)[1])
+
             
             self.is_hosting = True
             self.perf_monitor.start_monitoring()
