@@ -750,12 +750,18 @@ class HostView(Gtk.Box):
                 sunshine_config['audio'] = 'pulse'
                 
                 # Setup Audio Isolation Sinks BEFORE starting Sunshine
+                # Setup Audio Isolation Sinks BEFORE starting Sunshine
                 if self.dual_audio_row.get_active():
                     idx = self.audio_output_row.get_selected()
                     if self.audio_devices and 0 <= idx < len(self.audio_devices):
                          self.dual_audio_target = self.audio_devices[idx]['name']
-                         # Show Audio Mixer if dual audio is active
-                         self.audio_mixer_expander.set_visible(True)
+                    else:
+                        # Fallback: Use system default sink
+                        self.dual_audio_target = self.audio_manager.get_default_sink()
+                        print(f"Fallback: Usando sink padrão {self.dual_audio_target} para dual audio")
+                         
+                    # Show Audio Mixer if dual audio is active
+                    self.audio_mixer_expander.set_visible(True)
 
                 # Save state first
                 if self.audio_manager: self.audio_manager.save_state()
@@ -763,6 +769,8 @@ class HostView(Gtk.Box):
                 # Setup sinks (Null + Hybrid)
                 if self.audio_manager:
                     # capture_sink is "SunshineStereo" (Null Sink)
+                    # Note: setup_sunshine_audio handles dual_output being None (creates only Null Sink)
+                    # But we want Hybrid if dual_audio_row is active.
                     capture_sink = self.audio_manager.setup_sunshine_audio(self.dual_audio_target)
                     
                     # We pass the Sink Name to Sunshine. 

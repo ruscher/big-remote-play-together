@@ -105,12 +105,17 @@ class AudioManager:
         # Nome do sink final que será o padrão para APPs
         target_default_sink = sunshine_null_sink
         
-        # 2. Se Dual Audio, cria o Combine Sink
+            # 2. Se Dual Audio, cria o Combine Sink
         if dual_output:
             hybrid_name = "SunshineHybrid"
             # Combine o Null Sink (para isolamento) com a Saída Física (para ouvir localmente)
             try:
-                # Importante: Nomes sem espaços/acentos na lista de slaves se possível
+                # Importante: Nomes devem ser exatos. Se houver espaços, isso pode quebrar o parsing de argumentos do module.
+                # Não podemos usar aspas dentro do slaves=... diretamente no subprocess list sem cuidado.
+                # A sintaxe é slaves=sink1,sink2
+                
+                print(f"Tentando criar Combine Sink com slaves: {sunshine_null_sink}, {dual_output}")
+                
                 cmd = [
                     'pactl', 'load-module', 'module-combine-sink',
                     f'sink_name={hybrid_name}',
@@ -121,12 +126,22 @@ class AudioManager:
                 if res.returncode == 0:
                     self.active_modules.append(res.stdout.strip())
                     target_default_sink = hybrid_name
+                    print(f"Combine Sink criado com sucesso: {hybrid_name}")
                 else:
                     print(f"Erro ao criar combine sink: {res.stderr}")
+                    
+                    # Tentar fallback caso falhe por causa de nome
+                    # Se falhou, provavelmente o dual_output tem caracteres ruins ou não existe.
+                    # Vamos tentar só o Stereo como default então (Guest ouve, Host não... ruim, mas melhor que crash)
+                    # Ou melhor: Deixar Hardware como default e Guest ouve nada (estado atual).
+                    # Vamos tentar logar para debug.
+                    pass
+                    
             except Exception as e:
                 print(f"Exceção criando combine sink: {e}")
 
         # 3. Define como padrão
+        print(f"Definindo sink padrão para: {target_default_sink}")
         self.set_default_sink(target_default_sink)
         
         # Retorna o nome do Sink que o Sunshine deve "escutar" (O Null Sink isolado)
@@ -203,23 +218,15 @@ class AudioManager:
                 # Determinar destino desejado
                 if app_name in private_app_names:
                     target = private_sink
+                    target_label = "PRIVATE"
                 else:
                     target = shared_sink
+                    target_label = "SHARED"
                 
                 # Se não estiver no destino, mover
-                # Comparamos nomes. Pode haver mismatch se 'current_sink_name' for diferente do 'target' string
-                # Ex: "1" vs "alsa_output..."
-                # Mas move_app_to_sink aceita o nome alvo.
-                
-                # Se current_sink_name não é exatamente o target, tentamos mover.
-                # Para evitar spam de moves, idealmente checariamos se já está lá.
-                # Mas nomes de sink podem variar (ID vs Name).
-                # Vamos assumir que se o APP não estiver "Shared" e deveria estar, forçamos.
-                
-                # Simplificação: Executar o move. Se já estiver lá, o pactl é rápido e ignora ou faz pouco.
-                # Mas melhor checar:
                 if current_sink_name != target:
-                    #print(f"ENFORCE: Moving {app_name} from {current_sink_name} to {target}")
+                    # Debug only if actually mismatched to avoid spam
+                    # print(f"ENFORCE: App '{app_name}' (ID {app_id}) is on '{current_sink_name}'. Should be on '{target}' ({target_label}). Moving...")
                     self.move_app_to_sink(app_id, target)
                     
         except Exception as e:
