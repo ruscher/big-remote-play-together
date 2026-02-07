@@ -64,8 +64,8 @@ class AudioManager:
 
     def enable_streaming_audio(self, host_sink: str) -> bool:
         """
-        Ativa o modo Streaming (Host + Guest).
-        Cria Null Sink para o stream e Combine Sink para (Stream + Host).
+        Ativa o modo Streaming (Host + Guest) usando a estratégia 'GameSink' + Loopback.
+        Baseado no script Sunshine Áudio Isolado.
         """
         # Se o host_sink for virtual ou nulo, tenta achar o primeiro hardware real
         if not host_sink or self.is_virtual(host_sink):
@@ -81,35 +81,38 @@ class AudioManager:
         self.disable_streaming_audio(None) 
         
         try:
-            print(f"Habilitando Áudio Híbrido -> Combine Sink (Guest + Host: {host_sink})")
+            print(f"Habilitando Áudio Isolado -> GameSink (Stream) + Loopback p/ Host ({host_sink})")
             
-            # 1. Null Sink (Onde Sunshine vai 'olhar')
+            # 1. Null Sink 'SunshineGameSink' (onde o jogo toca e o Sunshine grava)
             subprocess.run([
                 'pactl', 'load-module', 'module-null-sink',
-                'sink_name=SunshineStereo',
-                'sink_properties=device.description=SunshineStreaming'
+                'sink_name=SunshineGameSink',
+                'sink_properties=device.description=SunshineGameSink'
             ], check=True)
             
-            # 2. Combine Sink (Une SunshineStereo + Hardware Local)
-            # Desta forma, o áudio vai SIMULTANEAMENTE para os dois, sem loopback.
-            # O ID/Nome do combine sink será "SunshineHybrid"
-            cmd_combine = [
-                'pactl', 'load-module', 'module-combine-sink',
-                'sink_name=SunshineHybrid',
-                f'slaves=SunshineStereo,{host_sink}',
-                'sink_properties=device.description=SunshineHybridOutput'
-            ]
-            subprocess.run(cmd_combine, check=True)
-            
-            # 3. Garantir volumes
-            subprocess.run(['pactl', 'set-sink-mute', 'SunshineStereo', '0'], check=False)
-            subprocess.run(['pactl', 'set-sink-volume', 'SunshineStereo', '100%'], check=False)
-            subprocess.run(['pactl', 'set-sink-mute', 'SunshineHybrid', '0'], check=False)
-            subprocess.run(['pactl', 'set-sink-volume', 'SunshineHybrid', '100%'], check=False)
+            # 2. Pequeno delay e garantir volumes do Null Sink
+            import time; time.sleep(0.2)
+            subprocess.run(['pactl', 'set-sink-mute', 'SunshineGameSink', '0'], check=False)
+            subprocess.run(['pactl', 'set-sink-volume', 'SunshineGameSink', '100%'], check=False)
 
-            # 4. Definir o Combine Sink como padrão
-            # Assim, novos jogos tocam no Hybrid -> que manda para Hardware e Stream
-            self.set_default_sink("SunshineHybrid")
+            # 3. Loopback para o Host (para o usuário ouvir o que toca no GameSink)
+            # Sem definir latência fixa, deixando o PulseAudio gerenciar (como no script .sh)
+            # source = SunshineGameSink.monitor
+            monitor_source = "SunshineGameSink.monitor" 
+            
+            res_loop = subprocess.run([
+                'pactl', 'load-module', 'module-loopback',
+                f'source={monitor_source}',
+                f'sink={host_sink}',
+                'sink_properties=device.description=SunshineLoopback'
+            ], capture_output=True, text=True, check=True)
+             
+            # 4. Tentar desmutar o loopback recém criado
+            loop_id = res_loop.stdout.strip()
+            print(f"Loopback criado com ID: {loop_id}")
+            
+            # 5. Definir SunshineGameSink como padrão (opcional, mas bom pra jogos novos irem pra ele)
+            self.set_default_sink("SunshineGameSink")
             
             return True
             
@@ -164,13 +167,13 @@ class AudioManager:
             if res.returncode == 0:
                 for line in res.stdout.splitlines():
                     # Critérios de busca para descarregar:
-                    # - Módulo de null-sink com o nosso nome
-                    # - Módulo de loopback que use o nosso monitor como fonte
-                    # - Resquícios do antigo SunshineHybrid
-                    if 'sink_name=SunshineStereo' in line or \
+                    # - Módulo de null-sink com nosso nome (GameSink)
+                    # - Loopbacks nossos
+                    if 'sink_name=SunshineGameSink' in line or \
+                       'sink_name=SunshineStereo' in line or \
                        'sink_name=SunshineHybrid' in line or \
-                       'source=SunshineStereo.monitor' in line or \
-                       'SunshineLocalLoop' in line:
+                       'source=SunshineGameSink.monitor' in line or \
+                       'SunshineLoopback' in line:
                         
                         mod_id = line.split()[0]
                         print(f"Limpando módulo de áudio: {mod_id}")

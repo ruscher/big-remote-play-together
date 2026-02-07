@@ -612,7 +612,7 @@ class HostView(Gtk.Box):
         if not self.is_hosting or not self.audio_mixer_expander.get_visible(): return True
         if not hasattr(self, 'active_host_sink') or not self.active_host_sink: return True
         
-        shared_sink = "SunshineHybrid"
+        shared_sink = "SunshineGameSink"
         private_sink = self.active_host_sink
         
         if hasattr(self, 'audio_manager'):
@@ -622,26 +622,24 @@ class HostView(Gtk.Box):
                     app_id = app['id']
                     name = app.get('name', '')
                     
-                    # Double check to avoid loops
-                    if 'sunshine' in name.lower() or 'hybrid' in name.lower(): continue
+                    # Double check to avoid loops (incluindo o GameSink e Loopback)
+                    if 'sunshine' in name.lower() or 'game' in name.lower() or 'loopback' in name.lower(): continue
 
                     target = private_sink if name in self.private_audio_apps else shared_sink
                     
                     # Verifica se já está no sink correto (pelo nome ou id)
                     current_sink = app.get('sink_name', '')
-                    current_sink_id = app.get('sink_id', '')
                     
-                    # O sink_name retornado pode ser 'SunshineHybrid' ou o nome do hardware
-                    # Se target for 'SunshineHybrid' e o app estiver no Hardware, mova.
-                    # Se target for Hardware e estiver em SunshineHybrid, mova.
+                    # Se target for 'SunshineGameSink' e o app estiver no Hardware, mova.
+                    # Se target for Hardware e estiver em SunshineGameSink, mova.
                     
                     if target == shared_sink:
-                        if 'sunshine' not in current_sink.lower():
-                            print(f"Enforcer: Movendo {name} para Hybrid ({target})")
+                        if 'sunshine' not in current_sink.lower() and 'game' not in current_sink.lower():
+                            print(f"Enforcer: Movendo {name} para GameSink ({target})")
                             self.audio_manager.move_app(app_id, target)
                     else:
                         # Se target é Hardware (Private), queremos que ele NÃO esteja no Sunshine
-                        if 'sunshine' in current_sink.lower():
+                        if 'sunshine' in current_sink.lower() or 'game' in current_sink.lower():
                             print(f"Enforcer: Movendo {name} para Privado ({target})")
                             self.audio_manager.move_app(app_id, target)
                             
@@ -768,15 +766,14 @@ class HostView(Gtk.Box):
                     if self.audio_manager.enable_streaming_audio(host_sink):
                         # Point Sunshine to the monitor of the Null Sink part of our setup
                         # The null sink is named "SunshineStereo" in audio.py
-                        monitor_src = self.audio_manager.get_sink_monitor_source("SunshineStereo")
-                        sunshine_config['audio_sink'] = monitor_src if monitor_src else "SunshineStereo.monitor"
+                        monitor_src = "SunshineGameSink.monitor"
+                        sunshine_config['audio_sink'] = monitor_src
                         
                         # Start Mixer UI updates
                         self.start_audio_mixer_refresh()
 
-                        # FEATURE REQUEST: Restore original host sink as default after 5 seconds
-                        # This allows the user to use volume keys for local audio, while the Enforcer
-                        # moves streamed apps to the Hybrid sink automatically.
+                        # Padrão: Restaurar Host Sink após 5s para que o usuário controle o volume local,
+                        # enquanto o Enforcer joga os jogos para o SunshineGameSink.
                         GLib.timeout_add(5000, lambda: (self.audio_manager.set_default_sink(host_sink), self.show_toast(f"Padrão restaurado: {host_sink}"))[1])
                     else:
                          print("Failed to enable streaming sinks, falling back to default")
