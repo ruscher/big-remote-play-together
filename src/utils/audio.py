@@ -138,8 +138,46 @@ class AudioManager:
                     subprocess.run(['pactl', 'set-sink-input-volume', target_id, '100%'], check=False)
                     print(f"Loopback stream {target_id} unmuted e setado para 100%")
                 else:
-                    print(f"AVISO: Não foi possível localizar o stream do Loopback (Module: {loop_id}) para unmute.")
+                    print(f"AVISO: ID exato não encontrado. Tentando estratégia RADICAL: Unmuting ALL Loopbacks.")
+                    # Fallback Radical: Unmute em TODOS os sink-inputs que parecem ser loopbacks
+                    # Isso garante que o som saia, conforme solicitado pelo usuário.
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith('Sink Input #'):
+                            idx = line.split('#')[1]
+                            # Verificar se é loopback (normalmente tem a ver com módulo loopback ou nome)
+                            # Vamos tentar desmutar cegamente apenas se tivermos certeza, mas aqui é radical.
+                            # Melhor: Listar modules e ver quais inputs pertencem a module-loopback
+                            pass
                     
+                    # Vamos iterar novamente procurando por Owner Module que seja de um loopback (qualquer um)
+                    # Não, vamos ser mais simples: "pactl list sink-inputs short" e filtrar por module-loopback se possível? 
+                    # O pactl short não mostra o modulo dono.
+                    
+                    # Vamos re-ler usando a lista completa já capturada
+                    current_idx = None
+                    is_loopback = False
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith('Sink Input #'):
+                            # Processar o anterior se era loopback
+                            if current_idx and is_loopback:
+                                subprocess.run(['pactl', 'set-sink-input-mute', current_idx, '0'], check=False)
+                                subprocess.run(['pactl', 'set-sink-input-volume', current_idx, '100%'], check=False)
+                                print(f"Fallback: Loopback {current_idx} unmuted.")
+                            
+                            current_idx = line.split('#')[1]
+                            is_loopback = False
+                        
+                        if 'module-loopback' in line or 'Loopback' in line or (loop_id and f'Owner Module: {loop_id}' in line):
+                             is_loopback = True
+                             
+                    # Processar o último
+                    if current_idx and is_loopback:
+                         subprocess.run(['pactl', 'set-sink-input-mute', current_idx, '0'], check=False)
+                         subprocess.run(['pactl', 'set-sink-input-volume', current_idx, '100%'], check=False)
+                         print(f"Fallback: Loopback {current_idx} unmuted.")
+
             except Exception as e:
                 print(f"Erro ao tentar configurar volume do loopback: {e}")
 
