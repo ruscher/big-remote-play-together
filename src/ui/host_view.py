@@ -10,6 +10,7 @@ from utils.game_detector import GameDetector
 from utils.config import Config
 class HostView(Gtk.Box):
     def __init__(self):
+        self.loading_settings = True
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.config = Config()
         self.is_hosting = False
@@ -29,6 +30,7 @@ class HostView(Gtk.Box):
         self.detected_games = {'Steam': [], 'Lutris': []}
         self.load_settings()
         self.connect_settings_signals()
+        self.loading_settings = False
         self.sync_ui_state()
         
     def detect_monitors(self):
@@ -206,37 +208,31 @@ class HostView(Gtk.Box):
         # --- Audio Group ---
         audio_group = Adw.PreferencesGroup()
         audio_group.set_title('Áudio')
-        audio_group.set_description('Configurações de som e microfonia')
+        audio_group.set_description('Configurações de som')
         audio_group.set_margin_top(12)
-        
-        self.audio_row = Adw.SwitchRow()
-        self.audio_row.set_title('Streaming de Áudio')
-        self.audio_row.set_subtitle('Transmitir áudio para guests')
-        self.audio_row.set_active(True)
-        audio_group.add(self.audio_row)
 
-        self.dual_audio_row = Adw.SwitchRow()
-        self.dual_audio_row.set_title('Áudio Híbrido (Host + Guest)')
-        self.dual_audio_row.set_subtitle('Cria saída virtual para permitir áudio simultâneo.\n⚠️ CUIDADO: Pode causar microfonia severa!')
-        self.dual_audio_row.set_active(False)
-        self.dual_audio_row.connect('notify::active', self.on_dual_audio_toggled)
-        audio_group.add(self.dual_audio_row)
-        
+        # 1. Host Output (Always visible, serves as the "Host" part of Host+Guest)
         self.audio_output_row = Adw.ComboRow()
-        self.audio_output_row.set_title('Saída de Áudio Local')
-        self.audio_output_row.set_subtitle('Onde você ouvirá o som')
-        self.audio_output_row.set_visible(False)
-        self.dual_audio_row.connect('notify::active', lambda row, param: self.audio_output_row.set_visible(row.get_active()))
+        self.audio_output_row.set_title('Saída de Áudio Host')
+        self.audio_output_row.set_subtitle('Onde VOCÊ ouvirá o som do jogo')
+        self.audio_output_row.set_icon_name('audio-speakers-symbolic')
+        self.audio_output_row.connect('notify::selected', self.on_audio_output_changed)
         audio_group.add(self.audio_output_row)
+
+        # 2. Streaming Switch
+        self.streaming_audio_row = Adw.SwitchRow()
+        self.streaming_audio_row.set_title('Streaming de Áudio')
+        self.streaming_audio_row.set_subtitle('Habilitar áudio no cliente (Gera som em Host + Guest)')
+        self.streaming_audio_row.set_active(True)
+        self.streaming_audio_row.connect('notify::active', self.on_streaming_toggled)
+        audio_group.add(self.streaming_audio_row)
         
+        # 3. Mixer (Only if Streaming is Enabled)
         self.audio_mixer_expander = Adw.ExpanderRow()
         self.audio_mixer_expander.set_title("Mixer de Áudio (Fontes)")
-        self.audio_mixer_expander.set_subtitle("Escolha quais aplicativos o Client pode ouvir")
+        self.audio_mixer_expander.set_subtitle("Gerenciar fontes de áudio")
         self.audio_mixer_expander.set_icon_name('audio-volume-high-symbolic')
-        self.audio_mixer_expander.set_visible(False)
-        # Ensure mixer enables if dual audio is active
-        self.dual_audio_row.connect('notify::active', lambda r, p: self.audio_mixer_expander.set_visible(r.get_active()))
-        self.dual_audio_row.connect('notify::active', lambda r, p: self.start_audio_mixer_refresh() if r.get_active() else self.stop_audio_mixer_refresh())
+        self.audio_mixer_expander.set_visible(True) # Visibility controlled by switch
         
         audio_group.add(self.audio_mixer_expander)
         
@@ -318,27 +314,10 @@ class HostView(Gtk.Box):
         self.start_audio_watchdog()
 
     def start_audio_watchdog(self):
-        self.audio_hijack_counter = 0
-        GLib.timeout_add(1000, self._check_audio_state)
-        
+        # Watchdog simplificado ou removido, já que o fluxo é controlado explicitamente
+        pass
+
     def _check_audio_state(self):
-        # Apenas monitora se estiver hospedando e com gerenciador de áudio ativo
-        if not self.is_hosting or not hasattr(self, 'audio_manager') or not self.audio_manager.original_sink:
-            self.audio_hijack_counter = 0
-            return True 
-            
-        current = self.audio_manager.get_default_sink()
-        # Se detectar que o Sunshine roubou o foco para o sink virtual dele
-        if current and 'sink-sunshine-stereo' in current:
-            self.audio_hijack_counter += 1
-            if self.audio_hijack_counter >= 5:
-                # Se persistir por 5 segundos, força a volta para o original
-                self.audio_manager.set_default_sink(self.audio_manager.original_sink)
-                self.show_toast(f"Áudio restaurado: {self.audio_manager.original_sink}")
-                self.audio_hijack_counter = 0 
-        else:
-            self.audio_hijack_counter = 0
-            
         return True
 
     def open_pin_dialog(self, _):
@@ -468,51 +447,59 @@ class HostView(Gtk.Box):
         self.summary_box.set_margin_top(12); self.summary_box.set_visible(False); self.field_widgets = {}
         for l, k, i, r in [('Host', 'hostname', 'computer-symbolic', True), ('IPv4', 'ipv4', 'network-wired-symbolic', False), ('IPv6', 'ipv6', 'network-wired-symbolic', False), ('IPv4 Global', 'ipv4_global', 'network-transmit-receive-symbolic', False), ('IPv6 Global', 'ipv6_global', 'network-transmit-receive-symbolic', False), ('PIN', 'pin', 'dialog-password-symbolic', False)]: self.create_masked_row(l, k, i, r)
 
-    def on_dual_audio_toggled(self, row, param):
-        if getattr(self, 'loading_settings', False):
-            return
-
-        if row.get_active():
-            dialog = Adw.MessageDialog(heading="Risco de Microfonia", body="Ativar o Áudio Híbrido reproduzirá o som do jogo no Host E no Guest simultaneamente.\n\n⚠️ Se o dispositivo cliente estiver no mesmo ambiente físico, isso causará eco e microfonia insuportável.\n\nDeseja continuar?")
-            dialog.set_transient_for(self.get_root())
-            dialog.add_response("cancel", "Cancelar")
-            dialog.add_response("ok", "Continuar")
-            dialog.set_response_appearance("ok", Adw.ResponseAppearance.DESTRUCTIVE)
-            
-            def on_resp(d, r):
-                if r != "ok":
-                    row.set_active(False)
-                else:
-                    self.audio_output_row.set_visible(True)
-                    self.save_host_settings()
-            
-            dialog.connect("response", on_resp)
-            dialog.present()
-        else:
-            self.audio_output_row.set_visible(False)
-            self.save_host_settings()
+    def on_streaming_toggled(self, row, param):
+        is_active = row.get_active()
+        self.audio_mixer_expander.set_visible(is_active)
+        # Se estiver hospedando, aplicar dinamicamente (opcional, pode exigir reinicio)
+        if self.is_hosting:
+             self.show_toast("Reinicie o servidor para aplicar alterações de áudio complexas.")
 
     def load_audio_outputs(self):
         try:
             from utils.audio import AudioManager
-            self.audio_manager = AudioManager()
-            devices = self.audio_manager.get_output_devices()
-            self.audio_output_model = Gtk.StringList()
+            if not hasattr(self, 'audio_manager'):
+                self.audio_manager = AudioManager()
+            
+            devices = self.audio_manager.get_passive_sinks()
             self.audio_devices = devices
             
+            model = Gtk.StringList()
             if not devices:
-                self.audio_output_model.append("Nenhum dispositivo encontrado")
+                model.append("Padrão do Sistema")
             else:
                 for dev in devices:
-                    self.audio_output_model.append(dev.get('description', dev.get('name', 'Unknown')))
-            self.audio_output_row.set_model(self.audio_output_model)
-            self.audio_output_row.set_selected(0)
-        except:
-            self.audio_manager = None
-            self.audio_devices = []
-            self.audio_output_model = Gtk.StringList()
-            self.audio_output_model.append("Erro ao carregar áudio")
-            self.audio_output_row.set_model(self.audio_output_model)
+                    model.append(dev.get('description', dev.get('name', 'Unknown')))
+            
+            self.audio_output_row.set_model(model)
+            # Tentar manter a seleção se possível, ou usar config
+            h = self.config.get('host', {})
+            self.audio_output_row.set_selected(h.get('audio_output_idx', 0))
+            
+        except Exception as e:
+            print(f"Error loading audio: {e}")
+            model = Gtk.StringList()
+            model.append("Erro ao carregar áudio")
+            self.audio_output_row.set_model(model)
+
+    def on_audio_output_changed(self, row, param):
+        if getattr(self, 'loading_settings', False): return
+        
+        idx = row.get_selected()
+        if self.audio_devices and 0 <= idx < len(self.audio_devices):
+            new_sink = self.audio_devices[idx]['name']
+        else:
+            new_sink = self.audio_manager.get_default_sink()
+        
+        # Se estiver hospedando e com áudio ativo, precisamos reconfigurar o loopback
+        if self.is_hosting and self.streaming_audio_row.get_active():
+            if hasattr(self, 'active_host_sink') and self.active_host_sink != new_sink:
+                print(f"Alterando saída do host em tempo real para: {new_sink}")
+                self.active_host_sink = new_sink
+                # Reiniciar streaming de áudio para mudar o destino do loopback
+                self.audio_manager.enable_streaming_audio(new_sink)
+                self.show_toast(f"Saída alterada para: {new_sink}")
+        
+        self.save_host_settings()
 
     def create_masked_row(self, title, key, icon_name='text-x-generic-symbolic', default_revealed=False):
         row = Adw.ActionRow()
@@ -604,7 +591,7 @@ class HostView(Gtk.Box):
 
     def start_audio_mixer_refresh(self):
         self.stop_audio_mixer_refresh()
-        self.private_audio_apps = set() # Track names of private apps
+        self.private_audio_apps = set() # Track names of private apps (unchecked in UI)
         self.mixer_source_id = GLib.timeout_add(2000, self._refresh_audio_mixer_ui)
         self.enforcer_source_id = GLib.timeout_add(1000, self._run_audio_enforcer)
         self._refresh_audio_mixer_ui()
@@ -619,67 +606,69 @@ class HostView(Gtk.Box):
             del self.enforcer_source_id
 
     def _run_audio_enforcer(self):
-        # Force routing
+        # Força o roteamento:
+        # Apps em self.private_audio_apps -> Host Sink (Somente local)
+        # Outros -> SunshineStereo (Host + Guest via Loopback)
         if not self.is_hosting or not self.audio_mixer_expander.get_visible(): return True
-        if not hasattr(self, 'dual_audio_target') or not self.dual_audio_target: return True
+        if not hasattr(self, 'active_host_sink') or not self.active_host_sink: return True
         
-        shared = "SunshineHybrid"
-        private = self.dual_audio_target # Hardware sink
+        shared_sink = "SunshineStereo"
+        private_sink = self.active_host_sink
         
         if hasattr(self, 'audio_manager'):
-            # Run in thread to avoid UI freeze if pactl is slow
-            import threading
-            threading.Thread(target=self.audio_manager.enforce_sink_routing, 
-                             args=(shared, private, list(self.private_audio_apps))).start()
+            try:
+                apps = self.audio_manager.get_apps()
+                for app in apps:
+                    app_id = app['id']
+                    name = app.get('name', '')
+                    target = private_sink if name in self.private_audio_apps else shared_sink
+                    
+                    if app.get('sink_name') != target:
+                         self.audio_manager.move_app(app_id, target)
+            except: pass
         return True
 
     def _refresh_audio_mixer_ui(self):
         if not self.audio_mixer_expander.get_visible(): return True
         if not hasattr(self, 'audio_manager'): return True
         
-        apps = self.audio_manager.get_audio_applications()
+        apps = self.audio_manager.get_apps()
+        seen_ids = set()
         
         if not hasattr(self, 'mixer_rows'): self.mixer_rows = {}
-        seen_ids = set()
         
         for app in apps:
             app_id = app['id']
-            app_name = app['name']
+            app_name = app.get('name', 'App')
             seen_ids.add(app_id)
             
-            # Logic: If app is in private_list -> Private. Else -> Shared.
-            # Default new apps to Shared (so they are removed from private list if they were there? No, persist prefs?)
-            # Ideally default is Shared.
-            
+            # Default state: Active (Shared) unless explicitly set to Private
             is_shared = (app_name not in self.private_audio_apps)
             
             if app_id in self.mixer_rows:
                 row = self.mixer_rows[app_id]
+                # Avoid signal loop
                 if row.get_active() != is_shared:
-                    row.disconnect_by_func(self._on_app_toggled) 
+                    row.disconnect_by_func(self._on_app_toggled)
                     row.set_active(is_shared)
                     row.connect('notify::active', self._on_app_toggled, app_name)
-                    
-                status_text = "🔊 Compartilhado (Host + Guest)" if is_shared else "🔒 Privado (Apenas Host)"
-                row.set_subtitle(status_text)
+                
+                row.set_subtitle("Host + Guest" if is_shared else "Apenas Host")
             else:
                 row = Adw.SwitchRow()
                 row.set_title(app_name)
-                status_text = "🔊 Compartilhado (Host + Guest)" if is_shared else "🔒 Privado (Apenas Host)"
-                row.set_subtitle(status_text)
-                row.set_icon_name(app['icon'] or 'audio-x-generic-symbolic')
+                row.set_subtitle("Host + Guest" if is_shared else "Apenas Host")
+                if app.get('icon'): row.set_icon_name(app['icon'])
                 row.set_active(is_shared)
                 row.connect('notify::active', self._on_app_toggled, app_name)
                 self.audio_mixer_expander.add_row(row)
                 self.mixer_rows[app_id] = row
                 
-        # Remove stale
-        to_remove = []
-        for aid, row in self.mixer_rows.items():
-            if aid not in seen_ids:
-                self.audio_mixer_expander.remove(row)
-                to_remove.append(aid)
-        for aid in to_remove: del self.mixer_rows[aid]
+        # Cleanup
+        to_remove = [aid for aid in self.mixer_rows if aid not in seen_ids]
+        for aid in to_remove:
+            self.audio_mixer_expander.remove(self.mixer_rows[aid])
+            del self.mixer_rows[aid]
             
         return True
 
@@ -691,12 +680,8 @@ class HostView(Gtk.Box):
         else:
             self.private_audio_apps.add(app_name)
             
-        # Trigger immediate enforcement
+        row.set_subtitle("Host + Guest" if is_shared else "Apenas Host")
         self._run_audio_enforcer()
-        
-        # Update text
-        status_text = "🔊 Compartilhado (Host + Guest)" if is_shared else "🔒 Privado (Apenas Host)"
-        row.set_subtitle(status_text)
              
     def start_hosting(self, b=None):
         self.loading_bar.set_visible(True); self.loading_bar.pulse()
@@ -743,44 +728,39 @@ class HostView(Gtk.Box):
             }
             
 
-            # Unified Audio Configuration
-            self.dual_audio_target = None
-            
-            if self.audio_row.get_active():
+            # Audio Configuration
+            if self.streaming_audio_row.get_active():
                 sunshine_config['audio'] = 'pulse'
                 
-                # Setup Audio Isolation Sinks BEFORE starting Sunshine
-                # Setup Audio Isolation Sinks BEFORE starting Sunshine
-                if self.dual_audio_row.get_active():
-                    idx = self.audio_output_row.get_selected()
-                    if self.audio_devices and 0 <= idx < len(self.audio_devices):
-                         self.dual_audio_target = self.audio_devices[idx]['name']
-                    else:
-                        # Fallback: Use system default sink
-                        self.dual_audio_target = self.audio_manager.get_default_sink()
-                        print(f"Fallback: Usando sink padrão {self.dual_audio_target} para dual audio")
-                         
-                    # Show Audio Mixer if dual audio is active
-                    self.audio_mixer_expander.set_visible(True)
-
-                # Save state first
-                if self.audio_manager: self.audio_manager.save_state()
+                # Identify Host Sink
+                host_sink_idx = self.audio_output_row.get_selected()
+                if self.audio_devices and 0 <= host_sink_idx < len(self.audio_devices):
+                    host_sink = self.audio_devices[host_sink_idx]['name']
+                else:
+                    host_sink = self.audio_manager.get_default_sink()
                 
-                # Setup sinks (Null + Hybrid)
+                # Store it for the enforcer
+                self.active_host_sink = host_sink
+
+                # Enable Host+Guest Streaming
                 if self.audio_manager:
-                    # capture_sink is "SunshineStereo" (Null Sink)
-                    # Note: setup_sunshine_audio handles dual_output being None (creates only Null Sink)
-                    # But we want Hybrid if dual_audio_row is active.
-                    capture_sink = self.audio_manager.setup_sunshine_audio(self.dual_audio_target)
-                    
-                    # We pass the Sink Name to Sunshine. 
-                    # Sunshine (Pulse) should automatically find the Monitor Source for this Sink.
-                    # FIX: Sunshine needs the SOURCE name, which is sink_name.monitor
-                    sunshine_config['audio_sink'] = f"{capture_sink}.monitor"
+                    # Returns True if success
+                    if self.audio_manager.enable_streaming_audio(host_sink):
+                        # Point Sunshine to the monitor of the Null Sink part of our setup
+                        # The null sink is named "SunshineStereo" in audio.py
+                        monitor_src = self.audio_manager.get_sink_monitor_source("SunshineStereo")
+                        sunshine_config['audio_sink'] = monitor_src if monitor_src else "SunshineStereo.monitor"
+                        
+                        # Start Mixer UI updates
+                        self.start_audio_mixer_refresh()
+                    else:
+                         print("Failed to enable streaming sinks, falling back to default")
             else:
-                sunshine_config['audio'] = 'none'
-                self.audio_manager.cleanup()
-                self.audio_mixer_expander.set_visible(False)
+                sunshine_config['audio'] = 'none' # Disable audio streaming per requirement
+                if self.audio_manager:
+                    # Ensure cleanly disabled
+                    self.audio_manager.disable_streaming_audio(None)
+                self.stop_audio_mixer_refresh()
 
             platforms = ['auto', 'wayland', 'x11', 'kms']
             platform = platforms[self.platform_row.get_selected()]
@@ -814,9 +794,6 @@ class HostView(Gtk.Box):
                 self.show_error_dialog('Erro ao Iniciar', 'Não foi possível iniciar o Sunshine.')
                 return
             
-            if self.audio_row.get_active() and self.dual_audio_row.get_active():
-                GLib.timeout_add(1000, lambda: (self.start_audio_mixer_refresh(), True)[1])
-
             
             self.is_hosting = True
             self.perf_monitor.start_monitoring()
@@ -842,7 +819,7 @@ class HostView(Gtk.Box):
         
         # Delay audio cleanup to ensure Sunshine releases resources first
         if hasattr(self, 'audio_manager'):
-            GLib.timeout_add(15000, lambda: (self.audio_manager.cleanup(), self.show_toast("Áudio Restaurado"))[1])
+            GLib.timeout_add(2000, lambda: (self.audio_manager.cleanup(), self.show_toast("Áudio Restaurado"))[1])
             
         self.is_hosting = False; self.sync_ui_state(); self.loading_bar.set_visible(False)
         self.show_toast('Parando servidor...')
@@ -920,6 +897,7 @@ class HostView(Gtk.Box):
         self.game_list_row.set_model(new_model)
 
     def save_host_settings(self, *args):
+        if getattr(self, 'loading_settings', False): return
         h = self.config.get('host', {})
         h.update({
             'mode_idx': self.game_mode_row.get_selected(),
@@ -930,8 +908,7 @@ class HostView(Gtk.Box):
             'monitor_idx': self.monitor_row.get_selected(),
             'gpu_idx': self.gpu_row.get_selected(),
             'platform_idx': self.platform_row.get_selected(),
-            'audio': self.audio_row.get_active(),
-            'dual_audio': self.dual_audio_row.get_active(),
+            'audio': self.streaming_audio_row.get_active(), # Now maps to Streaming Audio
             'audio_output_idx': self.audio_output_row.get_selected(),
             'input_sharing': self.input_row.get_active(),
             'upnp': self.upnp_row.get_active(),
@@ -953,15 +930,14 @@ class HostView(Gtk.Box):
             self.monitor_row.set_selected(h.get('monitor_idx', 0))
             self.gpu_row.set_selected(h.get('gpu_idx', 0))
             self.platform_row.set_selected(h.get('platform_idx', 0))
-            self.audio_row.set_active(h.get('audio', True))
             
-            dual_audio_active = h.get('dual_audio', False)
-            self.dual_audio_row.set_active(dual_audio_active)
-            if dual_audio_active:
-                self.audio_mixer_expander.set_visible(True)
-                self.start_audio_mixer_refresh()
+            # Audio
+            streaming_active = h.get('audio', True)
+            self.streaming_audio_row.set_active(streaming_active)
+            self.audio_mixer_expander.set_visible(streaming_active)
             
             self.audio_output_row.set_selected(h.get('audio_output_idx', 0))
+            
             self.input_row.set_active(h.get('input_sharing', True))
             self.upnp_row.set_active(h.get('upnp', True))
             self.ipv6_row.set_active(h.get('ipv6', True))
@@ -972,7 +948,7 @@ class HostView(Gtk.Box):
     def connect_settings_signals(self):
         for r in [self.game_mode_row, self.quality_row, self.monitor_row, self.gpu_row, self.platform_row, self.audio_output_row]:
             r.connect('notify::selected', self.save_host_settings)
-        for r in [self.audio_row, self.dual_audio_row, self.input_row, self.upnp_row, self.ipv6_row, self.webui_anyone_row]:
+        for r in [self.streaming_audio_row, self.input_row, self.upnp_row, self.ipv6_row, self.webui_anyone_row]:
             r.connect('notify::active', self.save_host_settings)
         for r in [self.custom_name_entry, self.custom_cmd_entry]:
             r.connect('notify::text', self.save_host_settings)
