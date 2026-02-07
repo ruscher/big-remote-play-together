@@ -104,19 +104,49 @@ class AudioManager:
                 'pactl', 'load-module', 'module-loopback',
                 f'source={monitor_source}',
                 f'sink={host_sink}',
-                'sink_properties=device.description=SunshineLoopback'
+                'latency_msec=1'
             ], capture_output=True, text=True, check=True)
              
             # 4. Tentar desmutar o loopback recém criado
             loop_id = res_loop.stdout.strip()
             print(f"Loopback criado com ID: {loop_id}")
             
-            # 5. Definir SunshineGameSink como padrão (opcional, mas bom pra jogos novos irem pra ele)
+            # Garantir que o stream do Loopback esteja 100% e unmuted
+            try:
+                # Buscar o ID do sink-input do Loopback via Owner Module
+                import time; time.sleep(0.5)
+                # Listar inputs detalhados
+                res_inputs = subprocess.run(['pactl', 'list', 'sink-inputs'], capture_output=True, text=True)
+                
+                current_id = None
+                target_id = None
+                
+                for line in res_inputs.stdout.splitlines():
+                    line = line.strip()
+                    if line.startswith('Sink Input #'):
+                        current_id = line.split('#')[1]
+                    elif line.startswith('Owner Module: '):
+                        owner_mod = line.split(':', 1)[1].strip()
+                        if owner_mod == loop_id and current_id:
+                            target_id = current_id
+                            break
+                        
+                if target_id:
+                    print(f"Encontrado loopback stream input: {target_id} (Owner Module: {loop_id})")
+                    subprocess.run(['pactl', 'set-sink-input-mute', target_id, '0'], check=False)
+                    subprocess.run(['pactl', 'set-sink-input-volume', target_id, '100%'], check=False)
+                    print(f"Loopback stream {target_id} unmuted e setado para 100%")
+                else:
+                    print(f"AVISO: Não foi possível localizar o stream do Loopback (Module: {loop_id}) para unmute.")
+                    
+            except Exception as e:
+                print(f"Erro ao tentar configurar volume do loopback: {e}")
+
             # 5. Definir SunshineGameSink como padrão (opcional, mas bom pra jogos novos irem pra ele)
             self.set_default_sink("SunshineGameSink")
 
             # 6. Verify creation
-            time.sleep(0.5)
+            time.sleep(0.2)
             sinks = subprocess.run(['pactl', 'list', 'short', 'sinks'], capture_output=True, text=True).stdout
             if 'SunshineGameSink' not in sinks:
                 print("ERRO CRÍTICO: SunshineGameSink não foi criado após comando!")
