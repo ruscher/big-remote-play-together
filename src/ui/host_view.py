@@ -608,11 +608,11 @@ class HostView(Gtk.Box):
     def _run_audio_enforcer(self):
         # Força o roteamento:
         # Apps em self.private_audio_apps -> Host Sink (Somente local)
-        # Outros -> SunshineStereo (Host + Guest via Loopback)
+        # Outros -> SunshineHybrid (Stream + Host)
         if not self.is_hosting or not self.audio_mixer_expander.get_visible(): return True
         if not hasattr(self, 'active_host_sink') or not self.active_host_sink: return True
         
-        shared_sink = "SunshineStereo"
+        shared_sink = "SunshineHybrid"
         private_sink = self.active_host_sink
         
         if hasattr(self, 'audio_manager'):
@@ -621,10 +621,30 @@ class HostView(Gtk.Box):
                 for app in apps:
                     app_id = app['id']
                     name = app.get('name', '')
+                    
+                    # Double check to avoid loops
+                    if 'sunshine' in name.lower() or 'hybrid' in name.lower(): continue
+
                     target = private_sink if name in self.private_audio_apps else shared_sink
                     
-                    if app.get('sink_name') != target:
-                         self.audio_manager.move_app(app_id, target)
+                    # Verifica se já está no sink correto (pelo nome ou id)
+                    current_sink = app.get('sink_name', '')
+                    current_sink_id = app.get('sink_id', '')
+                    
+                    # O sink_name retornado pode ser 'SunshineHybrid' ou o nome do hardware
+                    # Se target for 'SunshineHybrid' e o app estiver no Hardware, mova.
+                    # Se target for Hardware e estiver em SunshineHybrid, mova.
+                    
+                    if target == shared_sink:
+                        if 'sunshine' not in current_sink.lower():
+                            print(f"Enforcer: Movendo {name} para Hybrid ({target})")
+                            self.audio_manager.move_app(app_id, target)
+                    else:
+                        # Se target é Hardware (Private), queremos que ele NÃO esteja no Sunshine
+                        if 'sunshine' in current_sink.lower():
+                            print(f"Enforcer: Movendo {name} para Privado ({target})")
+                            self.audio_manager.move_app(app_id, target)
+                            
             except: pass
         return True
 
@@ -753,6 +773,11 @@ class HostView(Gtk.Box):
                         
                         # Start Mixer UI updates
                         self.start_audio_mixer_refresh()
+
+                        # FEATURE REQUEST: Restore original host sink as default after 5 seconds
+                        # This allows the user to use volume keys for local audio, while the Enforcer
+                        # moves streamed apps to the Hybrid sink automatically.
+                        GLib.timeout_add(5000, lambda: (self.audio_manager.set_default_sink(host_sink), self.show_toast(f"Padrão restaurado: {host_sink}"))[1])
                     else:
                          print("Failed to enable streaming sinks, falling back to default")
             else:

@@ -65,7 +65,7 @@ class AudioManager:
     def enable_streaming_audio(self, host_sink: str) -> bool:
         """
         Ativa o modo Streaming (Host + Guest).
-        Cria um Null Sink para o Guest e um Loopback para o Host.
+        Cria Null Sink para o stream e Combine Sink para (Stream + Host).
         """
         # Se o host_sink for virtual ou nulo, tenta achar o primeiro hardware real
         if not host_sink or self.is_virtual(host_sink):
@@ -78,42 +78,38 @@ class AudioManager:
                 return False
 
         # Limpar antes de criar para evitar duplicatas
-        self.disable_streaming_audio(None) # Não restaura agora, vamos restaurar no final se falhar
+        self.disable_streaming_audio(None) 
         
         try:
-            print(f"Habilitando Áudio Híbrido -> Streaming para Guest + Saída no Host ({host_sink})")
+            print(f"Habilitando Áudio Híbrido -> Combine Sink (Guest + Host: {host_sink})")
             
-            # 1. Null Sink (Streaming)
+            # 1. Null Sink (Onde Sunshine vai 'olhar')
             subprocess.run([
                 'pactl', 'load-module', 'module-null-sink',
                 'sink_name=SunshineStereo',
                 'sink_properties=device.description=SunshineStreaming'
             ], check=True)
             
-            # 2. Garantir que o Null Sink está ativo e com volume
+            # 2. Combine Sink (Une SunshineStereo + Hardware Local)
+            # Desta forma, o áudio vai SIMULTANEAMENTE para os dois, sem loopback.
+            # O ID/Nome do combine sink será "SunshineHybrid"
+            cmd_combine = [
+                'pactl', 'load-module', 'module-combine-sink',
+                'sink_name=SunshineHybrid',
+                f'slaves=SunshineStereo,{host_sink}',
+                'sink_properties=device.description=SunshineHybridOutput'
+            ]
+            subprocess.run(cmd_combine, check=True)
+            
+            # 3. Garantir volumes
             subprocess.run(['pactl', 'set-sink-mute', 'SunshineStereo', '0'], check=False)
             subprocess.run(['pactl', 'set-sink-volume', 'SunshineStereo', '100%'], check=False)
+            subprocess.run(['pactl', 'set-sink-mute', 'SunshineHybrid', '0'], check=False)
+            subprocess.run(['pactl', 'set-sink-volume', 'SunshineHybrid', '100%'], check=False)
 
-            # 3. Pequeno delay para o monitor source aparecer no Pulse/Pipewire
-            import time; time.sleep(0.3)
-            
-            # 4. Pegar o Monitor Source do Null Sink
-            null_monitor = self.get_sink_monitor_source("SunshineStereo")
-            if not null_monitor:
-                 raise Exception("Não foi possível encontrar o monitor do sink de streaming")
-
-            # 5. Loopback para o Host (para o usuário ouvir localmente)
-            subprocess.run([
-                'pactl', 'load-module', 'module-loopback',
-                f'source={null_monitor}',
-                f'sink={host_sink}',
-                'latency_msec=1',
-                'sink_properties=device.description=SunshineLocalLoop'
-            ], check=True)
-            
-            # 6. Definir o Null Sink como padrão do sistema
-            # Assim todos os jogos tocam nele e o loopback repassa para o hardware.
-            self.set_default_sink("SunshineStereo")
+            # 4. Definir o Combine Sink como padrão
+            # Assim, novos jogos tocam no Hybrid -> que manda para Hardware e Stream
+            self.set_default_sink("SunshineHybrid")
             
             return True
             
@@ -220,7 +216,12 @@ class AudioManager:
             if current: apps.append(current)
             
             # Filter internal streams if necessary
-            return [a for a in apps if a['name'] not in ['Sunshine', 'Simultaneous output to', 'Unknown']]
+            # Ignorar streams internos do PulseAudio/Pipewire que causam loops se movidos
+            def is_internal(name):
+                n = name.lower()
+                return any(x in n for x in ['sunshine', 'monitor', 'loopback', 'simultaneous', 'combine', 'output to'])
+            
+            return [a for a in apps if not is_internal(a.get('name', ''))]
             
         except Exception: 
             return []
