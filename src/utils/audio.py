@@ -177,6 +177,54 @@ class AudioManager:
             return True
         except: return False
 
+    def enforce_sink_routing(self, shared_sink: str, private_sink: str, private_app_names: List[str]):
+        """
+        Força o roteamento de áudio:
+        - Apps na lista private_app_names -> private_sink
+        - Todos os outros -> shared_sink
+        """
+        try:
+            # Obter lista de apps (Sink Inputs)
+            current_apps = self.get_audio_applications()
+            
+            # Obter IDs dos sinks alvo para comparação (pactl move aceita nome ou ID, mas a lista retorna ID no campo Sink:)
+            # Vamos usar nomes para o comando move, mas precisamos identificar onde o app está.
+            # get_audio_applications já retorna 'sink_name' (cacheado?) ou 'sink_index'.
+            
+            # Otimização: get_audio_applications é pesado? Ele roda pactl list sink-inputs.
+            # Sim, pode ser pesado rodar a cada 500ms se houver muitos inputs.
+            # Mas para garantir robustez...
+            
+            for app in current_apps:
+                app_id = app['id']
+                app_name = app.get('name', '')
+                current_sink_name = app.get('sink_name', '')
+                
+                # Determinar destino desejado
+                if app_name in private_app_names:
+                    target = private_sink
+                else:
+                    target = shared_sink
+                
+                # Se não estiver no destino, mover
+                # Comparamos nomes. Pode haver mismatch se 'current_sink_name' for diferente do 'target' string
+                # Ex: "1" vs "alsa_output..."
+                # Mas move_app_to_sink aceita o nome alvo.
+                
+                # Se current_sink_name não é exatamente o target, tentamos mover.
+                # Para evitar spam de moves, idealmente checariamos se já está lá.
+                # Mas nomes de sink podem variar (ID vs Name).
+                # Vamos assumir que se o APP não estiver "Shared" e deveria estar, forçamos.
+                
+                # Simplificação: Executar o move. Se já estiver lá, o pactl é rápido e ignora ou faz pouco.
+                # Mas melhor checar:
+                if current_sink_name != target:
+                    #print(f"ENFORCE: Moving {app_name} from {current_sink_name} to {target}")
+                    self.move_app_to_sink(app_id, target)
+                    
+        except Exception as e:
+            print(f"Erro no enforcement: {e}")
+
     def cleanup(self):
         """Remove módulos de loopback e restaura sink padrão"""
         if self.original_sink:

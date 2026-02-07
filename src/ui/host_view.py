@@ -604,7 +604,9 @@ class HostView(Gtk.Box):
 
     def start_audio_mixer_refresh(self):
         self.stop_audio_mixer_refresh()
-        self.mixer_source_id = GLib.timeout_add(3000, self._refresh_audio_mixer_ui)
+        self.private_audio_apps = set() # Track names of private apps
+        self.mixer_source_id = GLib.timeout_add(2000, self._refresh_audio_mixer_ui)
+        self.enforcer_source_id = GLib.timeout_add(1000, self._run_audio_enforcer)
         self._refresh_audio_mixer_ui()
         return True
 
@@ -612,69 +614,62 @@ class HostView(Gtk.Box):
         if hasattr(self, 'mixer_source_id'):
             GLib.source_remove(self.mixer_source_id)
             del self.mixer_source_id
+        if hasattr(self, 'enforcer_source_id'):
+            GLib.source_remove(self.enforcer_source_id)
+            del self.enforcer_source_id
+
+    def _run_audio_enforcer(self):
+        # Force routing
+        if not self.is_hosting or not self.audio_mixer_expander.get_visible(): return True
+        if not hasattr(self, 'dual_audio_target') or not self.dual_audio_target: return True
+        
+        shared = "SunshineHybrid"
+        private = self.dual_audio_target # Hardware sink
+        
+        if hasattr(self, 'audio_manager'):
+            # Run in thread to avoid UI freeze if pactl is slow
+            import threading
+            threading.Thread(target=self.audio_manager.enforce_sink_routing, 
+                             args=(shared, private, list(self.private_audio_apps))).start()
+        return True
 
     def _refresh_audio_mixer_ui(self):
-        # Allow refresh if visible, regardless of hosting state (per request)
         if not self.audio_mixer_expander.get_visible(): return True
         if not hasattr(self, 'audio_manager'): return True
         
-        # If dual_audio_target is not set yet (e.g. before start), try to get from UI selection or config?
-        # But we need the ACTUAL sink name to know what is "Private" vs "Shared".
-        # If not set, we can't reliably determine "Private".
-        # However, before hosting, apps are likely on Default Sink (Hardware).
-        # We can assume "Hardware" is "Private".
-        
-        target_sink = getattr(self, 'dual_audio_target', None)
-        if not target_sink:
-             # Try to get from UI selection if possible without committing
-             idx = self.audio_output_row.get_selected()
-             if hasattr(self, 'audio_devices') and 0 <= idx < len(self.audio_devices):
-                 target_sink = self.audio_devices[idx]['name']
-
-        if not target_sink: return True # Can't mix without target
-
         apps = self.audio_manager.get_audio_applications()
         
-        # Remove old rows that are not in new list
-        current_rows = {} # id -> row
-        
-        # Adw.ExpanderRow doesn't have get_rows easily accessible in Python bindings sometimes, depending on version.
-        # We can iterate children.
-        # But removing specific children is tricky if we don't track them.
-        # Simplest approach: Clear all and rebuild if count changes, or track IDs.
-        
-        # Let's try to track existing widgets to avoid flickering
         if not hasattr(self, 'mixer_rows'): self.mixer_rows = {}
-        
-        # Key: app_id
         seen_ids = set()
         
         for app in apps:
             app_id = app['id']
+            app_name = app['name']
             seen_ids.add(app_id)
             
-            # Check if sink is NOT the hardware sink (meaning it is Shared)
-            is_shared = (app.get('sink_name') != target_sink)
+            # Logic: If app is in private_list -> Private. Else -> Shared.
+            # Default new apps to Shared (so they are removed from private list if they were there? No, persist prefs?)
+            # Ideally default is Shared.
+            
+            is_shared = (app_name not in self.private_audio_apps)
             
             if app_id in self.mixer_rows:
                 row = self.mixer_rows[app_id]
-                # Update state silently
                 if row.get_active() != is_shared:
-                    row.disconnect_by_func(self._on_app_toggled) # Block signal
+                    row.disconnect_by_func(self._on_app_toggled) 
                     row.set_active(is_shared)
-                    row.connect('notify::active', self._on_app_toggled, app_id)
-                
-                # Update subtitle always for existing rows
+                    row.connect('notify::active', self._on_app_toggled, app_name)
+                    
                 status_text = "🔊 Compartilhado (Host + Guest)" if is_shared else "🔒 Privado (Apenas Host)"
                 row.set_subtitle(status_text)
             else:
                 row = Adw.SwitchRow()
-                row.set_title(app['name'])
+                row.set_title(app_name)
                 status_text = "🔊 Compartilhado (Host + Guest)" if is_shared else "🔒 Privado (Apenas Host)"
                 row.set_subtitle(status_text)
                 row.set_icon_name(app['icon'] or 'audio-x-generic-symbolic')
                 row.set_active(is_shared)
-                row.connect('notify::active', self._on_app_toggled, app_id)
+                row.connect('notify::active', self._on_app_toggled, app_name)
                 self.audio_mixer_expander.add_row(row)
                 self.mixer_rows[app_id] = row
                 
@@ -688,47 +683,20 @@ class HostView(Gtk.Box):
             
         return True
 
-    def _on_app_toggled(self, row, param, app_id):
-        # Resolve target sink again (hardware)
-        target_hw = getattr(self, 'dual_audio_target', None)
-        if not target_hw:
-             idx = self.audio_output_row.get_selected()
-             if hasattr(self, 'audio_devices') and 0 <= idx < len(self.audio_devices):
-                 target_hw = self.audio_devices[idx]['name']
-        
-        if not target_hw:
-            self.show_toast("Hardware de áudio não detectado")
-            row.set_active(False) # Revert
-            return
-
+    def _on_app_toggled(self, row, param, app_name):
         is_shared = row.get_active()
-        target_sink = "SunshineHybrid" if is_shared else target_hw
-        
-        # Verify if SunshineHybrid exists before trying to move
         if is_shared:
-            sinks = [s['name'] for s in self.audio_manager.get_output_devices()]
-            # Actually get_output_devices parses `pactl list sinks`.
-            # Sunshine-Hybrid is a module-combine-sink, it appears as a sink.
-            # But get_output_devices logic might miss it if description varies?
-            # It looks for "Sink #", "Name:", "Description:".
-            # It should find it.
-            
-            # Or just try to move and check result.
-            pass
-
-        success = self.audio_manager.move_app_to_sink(app_id, target_sink)
-        if success:
-             self.show_toast(f"Áudio {'Compartilhado' if is_shared else 'Privado (Local)'}")
+            if app_name in self.private_audio_apps:
+                self.private_audio_apps.remove(app_name)
         else:
-             if is_shared and not self.is_hosting:
-                 self.show_toast("Inicie o Servidor para habilitar o compartilhamento")
-                 # We allow the switch to stay ON visually? Or revert?
-                 # Reverting is better to reflect reality.
-                 row.disconnect_by_func(self._on_app_toggled)
-                 row.set_active(False)
-                 row.connect('notify::active', self._on_app_toggled, app_id)
-             else:
-                 self.show_toast("Falha ao mover áudio")
+            self.private_audio_apps.add(app_name)
+            
+        # Trigger immediate enforcement
+        self._run_audio_enforcer()
+        
+        # Update text
+        status_text = "🔊 Compartilhado (Host + Guest)" if is_shared else "🔒 Privado (Apenas Host)"
+        row.set_subtitle(status_text)
              
     def start_hosting(self, b=None):
         self.loading_bar.set_visible(True); self.loading_bar.pulse()
