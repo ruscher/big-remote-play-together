@@ -425,6 +425,14 @@ class GuestView(Gtk.Box):
             
             GLib.idle_add(self.close_pairing_dialog)
             
+            # Double check: Se pair retornar False, verifique se realmente falhou listando apps.
+            # O Moonlight as vezes fecha o pipe abruptamente após sucesso.
+            if not success:
+                print("DEBUG: Pair retornou False, verificando com list_apps...")
+                if self.moonlight.list_apps(host['ip']):
+                    print("DEBUG: list_apps funcionou! Pareamento foi um sucesso mascarado.")
+                    success = True
+            
             if success:
                 GLib.idle_add(lambda: (self.show_toast("Pareado com sucesso!"), self.connect_to_host(host)))
             else:
