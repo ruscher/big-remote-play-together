@@ -2,15 +2,17 @@
 # ==============================================================================
 # HEADSCALE ULTIMATE MANAGER - Rafael Ruscher Edition
 # Com Caddy Proxy para resolver erro de CORS (Failed to Fetch)
+# Suporte para HOST (Servidor) e GUEST (Cliente)
 # ==============================================================================
 
 set -e
 
-# Cores
+# Cores para interface
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 header() {
@@ -27,8 +29,10 @@ check_deps() {
     done
 }
 
+# --- FUNÇÃO PARA O SERVIDOR (HOST) ---
 setup_host() {
     header
+    echo -e "${YELLOW}CONFIGURAÇÃO DE HOST (SERVIDOR)${NC}"
     read -p "Domínio (ex: vpn.ruscher.org): " DOMAIN
     read -p "Cloudflare Zone ID: " ZONE_ID
     read -p "Cloudflare API Token: " API_TOKEN
@@ -42,7 +46,7 @@ setup_host() {
 :80 {
     # Rota para a Interface
     handle /web* {
-        reverse_proxy headscale-ui:8080
+        reverse_proxy headscale-ui:80
     }
     # Rota para a API e Tailscale
     handle /api* {
@@ -76,6 +80,7 @@ services:
     container_name: caddy
     ports:
       - "80:80"
+      - "41641:41641/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
     restart: unless-stopped
@@ -91,20 +96,23 @@ EOF
     sudo chmod -R 777 config data
 
     # 4. DNS Cloudflare
+    echo -e "${YELLOW}Atualizando DNS na Cloudflare...${NC}"
     CURRENT_IP=$(curl -s https://api.ipify.org)
     RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$DOMAIN" \
         -H "Authorization: Bearer $API_TOKEN" -H "Content-Type: application/json" | jq -r '.result[0].id')
-    if [ "$RECORD_ID" != "null" ]; then
+    
+    if [ "$RECORD_ID" != "null" ] && [ -n "$RECORD_ID" ]; then
         curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
             -H "Authorization: Bearer $API_TOKEN" -H "Content-Type: application/json" \
             --data "{\"type\":\"A\",\"name\":\"$DOMAIN\",\"content\":\"$CURRENT_IP\",\"ttl\":120,\"proxied\":false}"
     fi
 
-    # 5. Subindo containers e Portas
+    # 5. Subindo containers e Portas via UPnP (Roteador)
     docker-compose down || true
     docker-compose up -d
 
     IP_LOCAL=$(ip route get 1 | awk '{print $7;exit}')
+    echo -e "${YELLOW}Tentando abrir portas no roteador via UPnP...${NC}"
     upnpc -d 80 TCP 2>/dev/null || true
     upnpc -e "Headscale Proxy" -a $IP_LOCAL 80 80 TCP || true
     upnpc -e "Headscale Data" -a $IP_LOCAL 41641 41641 UDP || true
@@ -120,12 +128,50 @@ EOF
 
     header
     echo -e "${GREEN}TUDO PRONTO COM PROXY REVERSO!${NC}"
-    echo -e "Acesse a UI em: ${YELLOW}http://$IP_LOCAL/web${NC}"
-    echo -e "Headscale URL na UI: ${CYAN}http://$IP_LOCAL${NC}"
+    echo -e "Acesse a UI em: ${YELLOW}http://$DOMAIN/web${NC}"
+    echo -e "URL para configurar na UI: ${CYAN}http://$DOMAIN${NC}"
     echo -e "Sua API Key: ${CYAN}$API_KEY${NC}"
-    echo -e "Chave da VPN (Auth): ${GREEN}$AUTH_KEY${NC}"
+    echo -e "Chave da VPN para Amigos: ${GREEN}$AUTH_KEY${NC}"
+    echo -e "IP Local do Servidor: $IP_LOCAL"
     echo -e "${BLUE}====================================================${NC}"
 }
 
+# --- FUNÇÃO PARA O CLIENTE (GUEST) ---
+setup_guest() {
+    header
+    echo -e "${YELLOW}CONFIGURAÇÃO DE CLIENTE (GUEST)${NC}"
+    read -p "Domínio do Servidor do seu amigo: " HOST_DOMAIN
+    read -p "Chave de Acesso (Auth Key): " AUTH_KEY
+
+    echo -e "${YELLOW}Instalando e configurando Tailscale...${NC}"
+    sudo pacman -S tailscale --noconfirm
+    sudo systemctl enable --now tailscaled
+
+    echo -e "${YELLOW}Conectando à rede privada...${NC}"
+    sudo tailscale up --login-server http://$HOST_DOMAIN --authkey $AUTH_KEY
+
+    # Ajuste de Firewall (BigLinux/UFW)
+    if command -v ufw &> /dev/null; then
+        echo "Liberando interface tailscale0 no Firewall..."
+        sudo ufw allow in on tailscale0
+        sudo ufw reload
+    fi
+
+    echo -e "${GREEN}SUCESSO! Você agora está na rede privada.${NC}"
+    tailscale status
+}
+
+# --- MENU PRINCIPAL ---
+header
 check_deps
-setup_host
+echo "Selecione uma opção:"
+echo "1) Ser o HOST (Criar e Gerenciar a Rede)"
+echo "2) Ser o GUEST (Entrar na rede de um amigo)"
+echo "3) Sair"
+read -p "Opção: " OPT
+
+case $OPT in
+    1) setup_host ;;
+    2) setup_guest ;;
+    *) exit 0 ;;
+esac
