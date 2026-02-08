@@ -144,11 +144,14 @@ setup_guest() {
     read -p "Chave de Acesso (Auth Key): " AUTH_KEY
 
     echo -e "${YELLOW}Instalando e configurando Tailscale...${NC}"
-    sudo pacman -S tailscale --noconfirm
+    # Verifica se já está instalado para não reinstalar à toa
+    command -v tailscale &> /dev/null || sudo pacman -S tailscale --noconfirm
+    
     sudo systemctl enable --now tailscaled
 
     echo -e "${YELLOW}Conectando à rede privada...${NC}"
-    sudo tailscale up --login-server http://$HOST_DOMAIN --authkey $AUTH_KEY
+    # O segredo está na flag --reset que limpa configurações anteriores conflitantes
+    sudo tailscale up --login-server http://$HOST_DOMAIN --authkey $AUTH_KEY --reset --accept-dns=false
 
     # Ajuste de Firewall (BigLinux/UFW)
     if command -v ufw &> /dev/null; then
@@ -160,7 +163,6 @@ setup_guest() {
     echo -e "${GREEN}SUCESSO! Você agora está na rede privada.${NC}"
     tailscale status
 }
-
 # --- MENU PRINCIPAL ---
 header
 check_deps
